@@ -107,3 +107,5 @@ credentials.json
 #folders
 FOR-DELETION/
 aws-serverless-refactor/
+.pytest_cache/
+test/
