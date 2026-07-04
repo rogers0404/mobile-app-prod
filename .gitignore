@@ -3,6 +3,7 @@
 # IDE and editors
 .idea/
 .vscode/
+.mongodb/
 
 # Dependencies
 node_modules/
@@ -109,4 +110,3 @@ FOR-DELETION/
 aws-serverless-refactor/
 .pytest_cache/
 test/
-.mongodb/
