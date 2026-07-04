@@ -110,3 +110,8 @@ FOR-DELETION/
 aws-serverless-refactor/
 .pytest_cache/
 test/
+.mongodb/data/*
+.mongodb/*
+.mongodb/log/
+.mongodb/log/*
+.mongodb/mongodb-macos-x86_64-7.0.14/*
