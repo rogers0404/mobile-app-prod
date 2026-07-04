@@ -92,3 +92,5 @@ android-sdk/
 #folders
 .mongodb/
 test/
+FOR-DELETION/
+aws-serverless-refactor/
