@@ -88,3 +88,7 @@ agenthub/agents/youtube/db
 # Mobile development
 android-sdk/
 .mongodb/data/diagnostic.data/metrics.interim
+
+#folders
+.mongodb/
+test/
