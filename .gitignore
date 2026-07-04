@@ -1,41 +1,26 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# IDE and editors
+# System & OS
+.DS_Store
+
+# IDE and Editor directories
 .idea/
 .vscode/
 .mongodb/
-
-# Dependencies
-node_modules/
-/node_modules
-/.pnp
-.pnp.js
-.yarn/install-state.gz
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 .emergent/
+.chainlit
+.ipynb_checkpoints/
+.ac
 
-# Testing
-/coverage
-
-# Next.js
-/.next/
-/out/
-next-env.d.ts
-*.tsbuildinfo
-
-# Production builds
-/build
-dist/
-dist
-
-# Environment files (comprehensive coverage)
-
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
 *token.json*
-*credentials.json*
+*.pem
+*.key
+.credentials
 
 # Logs and debug files
 npm-debug.log*
@@ -43,22 +28,47 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 dump.rdb
-
-# System files
-.DS_Store
-*.pem
+chainlit.md
 
 # Python
 __pycache__/
-*pyc*
+*.pyc
 venv/
 .venv/
+.pytest_cache/
 
-# Development tools
-chainlit.md
-.chainlit
-.ipynb_checkpoints/
-.ac
+# Node / JavaScript
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Build artifacts and caches
+build/
+dist/
+.next/
+out/
+*.tsbuildinfo
+.cache/
+frontend/.metro-cache/
+
+# Project-specific ignores
+FOR-DELETION/
+aws-serverless-refactor/
+app-example/
+
+# Test artifacts
+coverage/
+test/
+test_reports/
+test_result.md
+*_test.py
+backend_test_no_auth.py
 
 # Deployment
 .vercel
@@ -75,43 +85,6 @@ agenthub/agents/youtube/db
 *.deb
 *.dylib
 
-# Build caches
-.cache/
-
 # Mobile development
-android-sdk/ -e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-
-#folders
-FOR-DELETION/
-aws-serverless-refactor/
-.pytest_cache/
-test/
-.mongodb/data/*
-.mongodb/*
-.mongodb/log/
-.mongodb/log/*
-.mongodb/mongodb-macos-x86_64-7.0.14/*
+android-sdk/
+.mongodb/data/diagnostic.data/metrics.interim
