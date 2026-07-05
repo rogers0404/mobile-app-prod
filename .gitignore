@@ -94,3 +94,4 @@ android-sdk/
 test/
 FOR-DELETION/
 aws-serverless-refactor/
+backend/.env

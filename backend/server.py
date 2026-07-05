@@ -21,8 +21,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 load_dotenv()
 
 # PayPal Configuration
-PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "Aa4nbnwrjDoXu8sMByKts9p2ulJ-YhB815CrJl6Pw5Vt0vqlcNi6RANSHHkVvnhU7A2W5Xv3XthtSJPs")
-PAYPAL_SECRET = os.getenv("PAYPAL_SECRET", "EMHV6aFm93J62O4wcsomipykrROQuVdo64dl_f6XUEtXYnMfM7oGdok8_iQEkYxT8aFpGNUsgrNWaFaL")
+PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
+PAYPAL_SECRET = os.getenv("PAYPAL_SECRET")
 PAYPAL_BASE_URL = "https://api-m.sandbox.paypal.com"
 
 # MongoDB Configuration
@@ -977,7 +977,7 @@ async def capture_payment_order(order_id: str, user_id: str):
 # Google Places Proxy (avoids CORS)
 # =========================
 
-GOOGLE_MAPS_API_KEY = "AIzaSyDcACq481PilZRSUgFvy6yQBjnRgzKkQqg"
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 
 @app.get("/api/places/search")
 async def search_places(query: str, latitude: float = 0, longitude: float = 0):
