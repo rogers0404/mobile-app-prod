@@ -48,16 +48,9 @@ export default function DriverHomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (activeRide) {
-      setTimeout(() => router.push('/driver/ride'), 0);
-    }
-  }, [activeRide]);
-
-  useEffect(() => {
     if (isOnline && isVerified) {
       const interval = setInterval(() => {
-        fetchPendingRides();
-        fetchActiveRide();
+        fetchActiveRide(); // Still poll for active ride in case of missed WS message
       }, 5000);
       return () => clearInterval(interval);
     }
@@ -84,6 +77,8 @@ export default function DriverHomeScreen() {
   useEffect(() => {
     if (isOnline) {
       connectWebSocket();
+      // Fetch any rides that are already pending when we come online
+      fetchPendingRides();
     } else {
       if (wsRef.current) {
         wsRef.current.close();
@@ -103,15 +98,17 @@ export default function DriverHomeScreen() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'ride_update') {
-            fetchActiveRide();
-            fetchPendingRides();
+          if (data.type === 'new_ride_request') {
             showNotification({
               title: 'New Ride Request',
               message: 'A rider nearby needs a ride!',
               type: 'info',
               icon: 'car',
             });
+            fetchPendingRides();
+          } else if (data.type === 'pending_ride_removed') {
+            // A ride was accepted by another driver or cancelled by the rider
+            fetchPendingRides();
           }
         } catch (e) {
           console.error('WS parse error:', e);
@@ -198,9 +195,6 @@ export default function DriverHomeScreen() {
 
     try {
       await updateStatus(value);
-      if (value) {
-        fetchPendingRides();
-      }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to update status.');
     }

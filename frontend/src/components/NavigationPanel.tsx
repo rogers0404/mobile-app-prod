@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,23 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { getApiUrl } from '../config/env';
 
-const API_URL = getApiUrl();
+const REROUTE_DISTANCE_METERS = 50;  // only re-fetch if moved > 50m
+const REROUTE_COOLDOWN_MS = 60_000; // minimum 60s between fetches
+
+function haversineMeters(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number
+): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 interface NavigationPanelProps {
   origin: { latitude: number; longitude: number };
@@ -45,23 +61,48 @@ export default function NavigationPanel({
   const [error, setError] = useState<string | null>(null);
   const [showSteps, setShowSteps] = useState(false);
 
+  const lastFetchOriginRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const lastFetchTimeRef = useRef<number>(0);
+  const destinationKey = `${destination.latitude},${destination.longitude}`;
+
+  // Fetch on mount and whenever destination changes
   useEffect(() => {
-    fetchDirections();
-    // Refresh directions every 30 seconds
-    const interval = setInterval(fetchDirections, 30000);
-    return () => clearInterval(interval);
-  }, [origin.latitude, origin.longitude, destination.latitude, destination.longitude]);
+    lastFetchOriginRef.current = null;
+    lastFetchTimeRef.current = 0;
+    doFetch();
+  }, [destinationKey]);
+
+  // Re-fetch when origin moves > REROUTE_DISTANCE_METERS and cooldown passed
+  useEffect(() => {
+    const now = Date.now();
+    const cooldownPassed = now - lastFetchTimeRef.current >= REROUTE_COOLDOWN_MS;
+    const last = lastFetchOriginRef.current;
+    const movedFar = !last || haversineMeters(
+      last.latitude, last.longitude,
+      origin.latitude, origin.longitude
+    ) >= REROUTE_DISTANCE_METERS;
+
+    if (cooldownPassed && movedFar) {
+      doFetch();
+    }
+  }, [origin.latitude, origin.longitude]);
+
+  const doFetch = async () => {
+    lastFetchOriginRef.current = { ...origin };
+    lastFetchTimeRef.current = Date.now();
+    await fetchDirections();
+  };
 
   const fetchDirections = async () => {
     try {
       const response = await fetch(
-        `${API_URL}/api/directions?` +
+        `${getApiUrl()}/api/directions?` +
         `origin_lat=${origin.latitude}&origin_lng=${origin.longitude}&` +
         `dest_lat=${destination.latitude}&dest_lng=${destination.longitude}`
       );
-      
+
       const data = await response.json();
-      
+
       if (data.status === 'OK') {
         setDirections({
           duration: data.duration,

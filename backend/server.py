@@ -16,7 +16,10 @@ import httpx
 import math
 import json
 import asyncio
+import logging
 from motor.motor_asyncio import AsyncIOMotorClient
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -193,8 +196,84 @@ async def broadcast_to_drivers(message: dict):
         if driver_id in active_connections:
             try:
                 await active_connections[driver_id].send_json(message)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to broadcast to driver {driver_id}: {e}")
+
+
+async def broadcast_ride_update(ride_id: str):
+    """Fetch a ride and broadcast its details to connected rider and driver."""
+    ride = await db.rides.find_one({"ride_id": ride_id}, {"_id": 0})
+    if not ride:
+        return
+
+    # Serialize ride to handle datetime objects
+    serialized_ride = serialize_ride(ride)
+
+    message = {"type": "ride_update", "ride": serialized_ride}
+
+    # Send to rider
+    rider_id = ride.get("rider_id")
+    if rider_id and rider_id in active_connections:
+        try:
+            await active_connections[rider_id].send_json(message)
+        except Exception as e:
+            logger.warning(f"Failed to send ride update to rider {rider_id}: {e}")
+
+    # Send to driver
+    driver_id = ride.get("driver_id")
+    if driver_id and driver_id in active_connections:
+        try:
+            await active_connections[driver_id].send_json(message)
+        except Exception as e:
+            logger.warning(f"Failed to send ride update to driver {driver_id}: {e}")
+
+
+def parse_ts(val) -> Optional[datetime]:
+    """Parse a timestamp value (datetime or ISO string) into a UTC-aware datetime."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.replace(tzinfo=timezone.utc) if val.tzinfo is None else val
+    if isinstance(val, str):
+        try:
+            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+        except ValueError:
+            return None
+    return None
+
+
+def _build_daily_chart(completed_rides: list, today_start: datetime) -> list:
+    """Build a 7-day earnings chart from completed rides."""
+    daily = []
+    for i in range(6, -1, -1):
+        day_start = today_start - timedelta(days=i)
+        day_end = day_start + timedelta(days=1)
+        day_rides = [
+            r for r in completed_rides
+            if (ts := parse_ts(r.get("completed_at"))) and day_start <= ts < day_end
+        ]
+        daily.append({
+            "date": day_start.strftime("%a"),
+            "amount": round(sum(r.get("fare", 0) for r in day_rides), 2),
+            "rides": len(day_rides),
+        })
+    return daily
+
+
+def _build_recent_rides(completed_rides: list) -> list:
+    """Build the 10 most recent completed ride summaries."""
+    recent = []
+    for r in completed_rides[:10]:
+        ts = r.get("completed_at", r.get("created_at", ""))
+        recent.append({
+            "ride_id": r["ride_id"],
+            "pickup_address": r.get("pickup_address", ""),
+            "dropoff_address": r.get("dropoff_address", ""),
+            "fare": r.get("fare", 0),
+            "completed_at": ts.isoformat() if isinstance(ts, datetime) else str(ts),
+        })
+    return recent
 
 # =========================
 # Health Check
@@ -329,72 +408,32 @@ async def get_driver_earnings(user_id: str):
     user = await get_user(user_id)
     if user.get("user_type") != "driver":
         raise HTTPException(status_code=403, detail="Not a driver")
-    
+
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
-    
+
     completed_rides = await db.rides.find(
         {"driver_id": user_id, "status": "completed"},
         {"_id": 0}
     ).sort("completed_at", -1).to_list(length=500)
-    
-    def parse_ts(val):
-        if val is None:
-            return None
-        if isinstance(val, datetime):
-            return val.replace(tzinfo=timezone.utc) if val.tzinfo is None else val
-        if isinstance(val, str):
-            try:
-                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-                return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
-            except:
-                return None
-        return None
-    
-    total_earnings = sum(r.get("fare", 0) for r in completed_rides)
-    total_rides = len(completed_rides)
-    
-    today_rides = [r for r in completed_rides if (ts := parse_ts(r.get("completed_at"))) and ts >= today_start]
-    today_earnings = sum(r.get("fare", 0) for r in today_rides)
-    
-    week_rides = [r for r in completed_rides if (ts := parse_ts(r.get("completed_at"))) and ts >= week_start]
-    week_earnings = sum(r.get("fare", 0) for r in week_rides)
-    
-    month_rides = [r for r in completed_rides if (ts := parse_ts(r.get("completed_at"))) and ts >= month_start]
-    month_earnings = sum(r.get("fare", 0) for r in month_rides)
-    
-    daily_earnings = []
-    for i in range(6, -1, -1):
-        day_start = today_start - timedelta(days=i)
-        day_end = day_start + timedelta(days=1)
-        day_rides = [r for r in completed_rides if (ts := parse_ts(r.get("completed_at"))) and day_start <= ts < day_end]
-        daily_earnings.append({
-            "date": day_start.strftime("%a"),
-            "amount": round(sum(r.get("fare", 0) for r in day_rides), 2),
-            "rides": len(day_rides),
-        })
-    
-    recent = []
-    for r in completed_rides[:10]:
-        ts = r.get("completed_at", r.get("created_at", ""))
-        recent.append({
-            "ride_id": r["ride_id"],
-            "pickup_address": r.get("pickup_address", ""),
-            "dropoff_address": r.get("dropoff_address", ""),
-            "fare": r.get("fare", 0),
-            "completed_at": ts.isoformat() if isinstance(ts, datetime) else str(ts),
-        })
-    
+
+    def rides_since(cutoff: datetime) -> list:
+        return [r for r in completed_rides if (ts := parse_ts(r.get("completed_at"))) and ts >= cutoff]
+
+    today_rides = rides_since(today_start)
+    week_rides = rides_since(week_start)
+    month_rides = rides_since(month_start)
+
     return {
-        "total_earnings": round(total_earnings, 2),
-        "total_rides": total_rides,
-        "today": {"earnings": round(today_earnings, 2), "rides": len(today_rides)},
-        "this_week": {"earnings": round(week_earnings, 2), "rides": len(week_rides)},
-        "this_month": {"earnings": round(month_earnings, 2), "rides": len(month_rides)},
-        "daily_chart": daily_earnings,
-        "recent_rides": recent,
+        "total_earnings": round(sum(r.get("fare", 0) for r in completed_rides), 2),
+        "total_rides": len(completed_rides),
+        "today": {"earnings": round(sum(r.get("fare", 0) for r in today_rides), 2), "rides": len(today_rides)},
+        "this_week": {"earnings": round(sum(r.get("fare", 0) for r in week_rides), 2), "rides": len(week_rides)},
+        "this_month": {"earnings": round(sum(r.get("fare", 0) for r in month_rides), 2), "rides": len(month_rides)},
+        "daily_chart": _build_daily_chart(completed_rides, today_start),
+        "recent_rides": _build_recent_rides(completed_rides),
     }
 
 
@@ -654,6 +693,12 @@ async def request_ride(data: RideRequest):
     
     ride.pop("_id", None)
     
+    # Broadcast to all online drivers that a new ride is available
+    await broadcast_to_drivers({
+        "type": "new_ride_request",
+        "ride": serialize_ride(ride)
+    })
+    
     return serialize_ride(ride)
 
 @app.post("/api/rides/accept")
@@ -703,7 +748,14 @@ async def accept_ride(data: AcceptRideRequest):
         }}
     )
     
+    # Notify other drivers that this ride is no longer pending
+    await broadcast_to_drivers({
+        "type": "pending_ride_removed",
+        "ride_id": data.ride_id
+    })
+    
     updated_ride = await db.rides.find_one({"ride_id": data.ride_id}, {"_id": 0})
+    await broadcast_ride_update(data.ride_id)
     return serialize_ride(updated_ride) if updated_ride else updated_ride
 
 @app.post("/api/rides/update-status")
@@ -729,6 +781,13 @@ async def update_ride_status(data: UpdateRideStatusRequest):
     if data.status not in valid_transitions.get(current_status, []):
         raise HTTPException(status_code=400, detail=f"Cannot change status from {current_status} to {data.status}")
     
+    # If a pending ride is cancelled by the rider, notify all drivers to remove it
+    if current_status == "pending" and data.status == "cancelled":
+        await broadcast_to_drivers({
+            "type": "pending_ride_removed",
+            "ride_id": data.ride_id
+        })
+    
     update_data = {"status": data.status}
     
     if data.status == "picked_up":
@@ -744,6 +803,7 @@ async def update_ride_status(data: UpdateRideStatusRequest):
     )
     
     updated_ride = await db.rides.find_one({"ride_id": data.ride_id}, {"_id": 0})
+    await broadcast_ride_update(data.ride_id)
     return serialize_ride(updated_ride) if updated_ride else updated_ride
 
 @app.get("/api/rides/{user_id}/active")
@@ -1128,29 +1188,13 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                             "latitude": data["latitude"],
                             "longitude": data["longitude"]
                         })
-                    except:
-                        pass
-            
-            # Handle ride status updates
-            elif data.get("type") == "ride_update":
-                ride_id = data.get("ride_id")
-                ride = await db.rides.find_one({"ride_id": ride_id}, {"_id": 0})
-                
-                if ride:
-                    # Notify the other party
-                    other_user = ride["driver_id"] if ride["rider_id"] == user_id else ride["rider_id"]
-                    if other_user and other_user in active_connections:
-                        try:
-                            await active_connections[other_user].send_json({
-                                "type": "ride_update",
-                                "ride": ride
-                            })
-                        except:
-                            pass
+                    except Exception as e:
+                        logger.warning(f"Failed to send location to rider {active_ride['rider_id']}: {e}")
                             
     except WebSocketDisconnect:
         active_connections.pop(user_id, None)
-    except Exception as e:
+    except (RuntimeError, ValueError, OSError) as e:
+        logger.error("WebSocket error for user %s: %s", user_id, e)
         active_connections.pop(user_id, None)
 
 if __name__ == "__main__":

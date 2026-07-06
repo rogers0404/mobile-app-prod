@@ -33,12 +33,6 @@ export default function RiderHomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (activeRide) {
-      setTimeout(() => router.push('/rider/tracking'), 0);
-    }
-  }, [activeRide]);
-
-  useEffect(() => {
     if (location) {
       const interval = setInterval(() => {
         fetchNearbyDrivers(location.coords.latitude, location.coords.longitude);

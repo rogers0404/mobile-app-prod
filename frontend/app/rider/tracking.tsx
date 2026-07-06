@@ -33,18 +33,16 @@ export default function RideTrackingScreen() {
   const [directionsInfo, setDirectionsInfo] = useState<DirectionsInfo | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const prevStatusRef = useRef<string | null>(null);
+  const lastDirectionsFetch = useRef(0);
 
   useEffect(() => {
-    loadRide();
-    const interval = setInterval(() => {
-      if (activeRide?.ride_id) {
-        fetchRideDetails(activeRide.ride_id);
-      } else {
-        fetchActiveRide();
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
+    // If activeRide is already in the store, we don't need to fetch it again.
+    // This prevents a race condition where this fetch overwrites a WebSocket update.
+    if (!activeRide) {
+      loadRide();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   // Connect WebSocket for real-time driver location
@@ -58,10 +56,20 @@ export default function RideTrackingScreen() {
     };
   }, []);
 
-  // Fetch ETA when driver location changes or ride status changes
+  // Fetch ETA when driver location or ride status changes, throttled to 30 seconds
   useEffect(() => {
     if (activeRide && (activeRide.status === 'accepted' || activeRide.status === 'picked_up')) {
-      fetchDirectionsInfo();
+      const now = Date.now();
+      const statusChanged = prevStatusRef.current !== activeRide.status;
+
+      // Fetch immediately on status change, then throttle to every 30s
+      if (statusChanged || now - lastDirectionsFetch.current > 30000) {
+        fetchDirectionsInfo();
+        lastDirectionsFetch.current = now;
+      }
+    } else {
+      setDirectionsInfo(null);
+      lastDirectionsFetch.current = 0; // Reset timer when ride is not active
     }
   }, [driverLocation, activeRide?.status]);
 
@@ -170,6 +178,12 @@ export default function RideTrackingScreen() {
       const wsUrl = API_URL.replace('https://', 'wss://').replace('http://', 'ws://');
       const ws = new WebSocket(`${wsUrl}/api/ws/${userId}`);
 
+      ws.onopen = () => {
+        // Sync ride state on connect to prevent missing an update
+        // that happened during the connection phase.
+        fetchActiveRide();
+      };
+
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -179,8 +193,12 @@ export default function RideTrackingScreen() {
               longitude: data.longitude,
             });
           } else if (data.type === 'ride_update') {
-            // Ride status changed via WebSocket
-            fetchActiveRide();
+            // Ride status changed via WebSocket, update store directly
+            if (data.ride) {
+              useRideStore.setState({ activeRide: data.ride });
+            } else {
+              fetchActiveRide(); // Fallback if ride data is missing
+            }
           }
         } catch (e) {
           console.error('WS message parse error:', e);
@@ -319,8 +337,17 @@ export default function RideTrackingScreen() {
       ) : (
         <InteractiveMap
           style={styles.map}
-          latitude={driverLocation?.latitude || (activeRide.pickup_latitude + activeRide.dropoff_latitude) / 2}
-          longitude={driverLocation?.longitude || (activeRide.pickup_longitude + activeRide.dropoff_longitude) / 2}
+          latitude={
+            activeRide.status === 'accepted'
+              ? activeRide.pickup_latitude
+              : driverLocation?.latitude || (activeRide.pickup_latitude + activeRide.dropoff_latitude) / 2
+          }
+          longitude={
+            activeRide.status === 'accepted'
+              ? activeRide.pickup_longitude
+              : driverLocation?.longitude ||
+                (activeRide.pickup_longitude + activeRide.dropoff_longitude) / 2
+          }
           markers={mapMarkers}
           showRoute
           routeOrigin={{ latitude: activeRide.pickup_latitude, longitude: activeRide.pickup_longitude }}
