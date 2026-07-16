@@ -56,22 +56,35 @@ export default function DriverHomeScreen() {
     }
   }, [isOnline, isVerified]);
 
+  // Periodically fetch and update driver's location when online
   useEffect(() => {
-    if (isOnline && location) {
-      const interval = setInterval(() => {
-        updateLocation(location.coords.latitude, location.coords.longitude);
-        // Also send via WebSocket for real-time tracking
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'location_update',
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-          }));
+    if (isOnline) {
+      const locationInterval = setInterval(async () => {
+        try {
+          const currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setLocation(currentLocation);
+
+          const { latitude, longitude } = currentLocation.coords;
+
+          // Update location via API
+          await updateLocation(latitude, longitude);
+
+          // Also send via WebSocket for real-time rider tracking
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              type: 'location_update',
+              latitude,
+              longitude,
+            }));
+          }
+        } catch (error) {
+          console.error('Periodic location update error:', error);
         }
-      }, 5000);
-      return () => clearInterval(interval);
+      }, 10000); // Update every 10 seconds
+
+      return () => clearInterval(locationInterval);
     }
-  }, [isOnline, location]);
+  }, [isOnline]);
 
   // Connect WebSocket when driver goes online
   useEffect(() => {

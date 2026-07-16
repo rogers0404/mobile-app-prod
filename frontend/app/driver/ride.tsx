@@ -37,24 +37,31 @@ export default function ActiveRideScreen() {
 
     initLocation();
 
-    // Update driver location every 10s
+    // Periodically update and broadcast driver location
     const locationInterval = setInterval(async () => {
       try {
+        let coords: { latitude: number; longitude: number };
+
         if (Platform.OS === 'web' && navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              const loc = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-              setCurrentLocation(loc);
-              updateLocation(loc.latitude, loc.longitude);
-            },
-            (err) => console.error('Location error:', err),
-            { enableHighAccuracy: true }
-          );
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 });
+          });
+          coords = pos.coords;
         } else {
           const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          const loc = { latitude: location.coords.latitude, longitude: location.coords.longitude };
-          setCurrentLocation(loc);
-          await updateLocation(loc.latitude, loc.longitude);
+          coords = location.coords;
+        }
+
+        setCurrentLocation(coords);
+        await updateLocation(coords.latitude, coords.longitude);
+
+        // Send location via WebSocket for real-time rider tracking
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'location_update',
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+          }));
         }
       } catch (error) {
         console.error('Location update error:', error);
@@ -101,6 +108,15 @@ export default function ActiveRideScreen() {
           }
         };
 
+        ws.onclose = () => {
+          // If the ref still holds this ws instance, it means it wasn't a manual close on unmount.
+          // Try to reconnect.
+          if (wsRef.current === ws) {
+            console.log('Driver WebSocket closed, attempting to reconnect in 3s...');
+            setTimeout(connectWebSocket, 3000);
+          }
+        };
+
         wsRef.current = ws;
       } catch (error) {
         console.error('Driver WebSocket connection error:', error);
@@ -109,7 +125,11 @@ export default function ActiveRideScreen() {
 
     connectWebSocket();
 
-    return () => wsRef.current?.close();
+    return () => {
+      const ws = wsRef.current;
+      wsRef.current = null; // Signal that we are unmounting to prevent reconnection
+      if (ws) ws.close();
+    };
   }, [activeRide?.ride_id]);
 
   useEffect(() => {
