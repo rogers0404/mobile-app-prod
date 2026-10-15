@@ -32,11 +32,6 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE"
       ],
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyDcACq481PilZRSUgFvy6yQBjnRgzKkQqg"
-        }
-      },
       "package": "com.emergent.tripridepreview.s6il49"
     },
     "web": {

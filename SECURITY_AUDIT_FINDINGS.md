@@ -1,190 +1,38 @@
-# Security, Configuration, and Vulnerability Audit
+# Security status and repository hygiene
 
-Date: 2026-09-07
+Reviewed: 2026-10-15. Scope: repository configuration cleanup and targeted source review, not a penetration test or production certification. This replaces the historical 2026-09-07 report; earlier assertions about live credentials and dependency counts are not current evidence.
 
-## Executive Summary
+## Repository cleanup
 
-This project is not currently production-safe. The main issues are hard-coded secrets, insecure CORS settings, an unauthenticated API surface, and a significant set of frontend dependency vulnerabilities. The backend still compiles cleanly, but the configuration and security posture present clear risk.
+- Removed the literal Maps key from `frontend/app.json`. `frontend/app.config.js` now injects separate Android and optional iOS native keys from environment variables.
+- Added blank credential templates in `frontend/.env.example` and `backend/.env.example`. Actual `.env` files remain ignored and are not tracked in the current index.
+- Removed 9,027 generated Metro cache files from Git tracking while preserving local copies. Added an explicit ignore rule for Expo-generated state.
+- Native and browser Maps keys remain extractable from shipped apps. Environment injection avoids literal keys in source; it does not make client keys private.
 
-## Verification Evidence
+## Verified open issues
 
-- Backend syntax validation: `python3 -m compileall backend` returned exit code 0.
-- Dependency audit: `npm audit --audit-level=low --json` returned exit code 1 with 38 vulnerabilities total.
-- The report shows: 1 critical, 10 high, 26 moderate, 1 low.
-- The backend and frontend include active secrets in committed files and runtime config.
+| Area | Current evidence | Remaining work |
+| --- | --- | --- |
+| Identity and authorization | The active FastAPI app accepts client-supplied user identifiers; no server-validated authentication dependency was found in the targeted route review. | Establish authenticated identity and enforce roles/ownership for HTTP and WebSocket access before production use. |
+| Browser access | Backend CORS still combines wildcard origins with credentials. | Define an environment-specific origin allowlist and required credential behavior. CORS does not replace authentication. |
+| Configuration | Backend reads payment and Maps credentials from the environment, retains local MongoDB defaults, and lacks centralized production startup validation. | Define production-required settings and fail startup when they are missing. |
+| Maps | The request screen still calls Geocoding directly with a client key; web maps use a client key. Native keys are now configured separately. | Review each platform/API combination, restrict keys, and move unsuitable direct web-service calls behind an authenticated, rate-limited server endpoint. |
+| Payments and realtime | No full payment replay, cross-user authorization, or realtime isolation test was completed in this cleanup. | Verify these flows with isolated tests before production use. |
 
-## Findings
+## Dependency check
 
-### 1) Hard-coded secrets and API keys in source-controlled files
+A fresh `npm audit --json` against the frontend npm dependency graph on 2026-10-15 completed with exit code 1 and reported **54** findings: **1 critical, 33 high, 19 moderate, 1 low**. These are package advisory findings, not 54 proven application exploits. Runtime/build exposure and reachable attack paths were not assessed. No forced upgrades were applied. Backend dependencies were not audited in this pass.
 
-High risk / immediate action required.
+## History review and limits
 
-Evidence:
-- [backend/.env](backend/.env) contains live PayPal credentials and a Google Maps key.
-- [frontend/.env](frontend/.env) contains a public Google Maps key.
-- [frontend/app.json](frontend/app.json) embeds the Google Maps API key in the Android config.
-- [backend/server.py](backend/server.py) reads secrets via `os.getenv()` but does not fail fast if they are missing.
-- [frontend/src/config/env.ts](frontend/src/config/env.ts) exposes client-side environment values directly.
-- [frontend/app/rider/request.tsx](frontend/app/rider/request.tsx) calls Google Geocoding directly from the mobile app using a browser-exposed key.
+A targeted pattern scan covered 4,926 unique blobs across 24 commits reachable from local Git refs. It detected Maps-key material in historical app configuration, backend source, and generated Metro caches. The scan skipped binary blobs and is not proof that all secrets were found. Existing history was not rewritten; removing files from the latest tree does not erase older copies. Remote-only refs were not part of this scan.
 
-Why this matters:
-- Secrets are exposed to anyone with repository access or a built app binary.
-- The Google key can be abused for billing and API quota exhaustion.
-- PayPal credentials can be used to make unauthorized API calls or hijack payment flow behavior.
+## Provider actions still required
 
-Recommended fix:
-- Remove all secrets from repo-tracked files.
-- Move credentials to a secret manager or environment injection system.
-- Restrict Google Maps API key usage by referrer/IP and separate keys by environment.
-- Use backend-only proxying for third-party APIs instead of exposing keys in the client.
+The current provider configuration and credential validity were not queried. No key was used to test access, restricted, rotated, or revoked in this cleanup.
 
----
+- Review Google Cloud key usage and restrictions. Use separate application restrictions for Android, iOS, browser, and server keys, plus only the required APIs. Validate legitimate clients before retiring an old key.
+- Rotate any exposed private credential through its provider. Removing current files or rewriting history does not revoke a credential.
+- Keep exact credential values and incident response details outside this repository. Local generated files and previous Git history can retain older values.
 
-### 2) CORS misconfiguration creates browser security risk
-
-High risk / immediate action required.
-
-Evidence:
-- [backend/server.py](backend/server.py) sets:
-  - `allow_origins=["*"]`
-  - `allow_credentials=True`
-
-This is a known problematic combination in browsers. A wildcard origin with credentialed requests is not safe and can cause unexpected failures or insecure behavior.
-
-Why this matters:
-- It broadens the trust boundary for cross-origin requests.
-- It can enable cross-site abuse if the API is exposed beyond a trusted client environment.
-- It is unsafe for production deployments.
-
-Recommended fix:
-- Restrict origins to an explicit allowlist.
-- Disable credentialed wildcard CORS.
-- Use a clearly defined backend domain and same-origin or trusted-origin policy.
-
----
-
-### 3) No authentication or authorization layer on the backend
-
-Critical risk.
-
-Evidence:
-- The intro comment in [backend/server.py](backend/server.py) states: "No authentication required - simple user ID based system".
-- No JWT, session, OAuth, API key enforcement, or role-based access control was found in the backend API layer.
-
-Why this matters:
-- Any client can create, modify, or query ride and user records if the API is reachable.
-- Sensitive actions such as payment processing and driver status updates are not protected.
-- This is not appropriate for any real-world deployment.
-
-Recommended fix:
-- Add authentication and authorization middleware.
-- Require signed tokens or OAuth/OIDC for all protected routes.
-- Validate ownership before allowing ride, payment, or driver actions.
-- Add rate limits and request auditing.
-
----
-
-### 4) Unsafe default configuration and weak startup validation
-
-High risk.
-
-Evidence:
-- [backend/server.py](backend/server.py) provides default MongoDB values:
-  - `MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")`
-  - `DB_NAME = os.getenv("DB_NAME", "test_database")`
-- Secrets are optional environment values and the app continues booting without validating readiness.
-
-Why this matters:
-- Local defaults can silently deploy insecurely.
-- If environment variables are missing, the system may run in an unintended mode and fail later in production.
-- The system does not fail fast at startup when critical configuration is absent.
-
-Recommended fix:
-- Validate required environment variables at startup.
-- Refuse to boot when production settings are incomplete.
-- Use separate config for development, staging, and production.
-
----
-
-### 5) Frontend exposes API keys at runtime and in generated app files
-
-High risk.
-
-Evidence:
-- [frontend/.expo/dev/logs/start.log](frontend/.expo/dev/logs/start.log) logs the live Google Maps key in development output.
-- [frontend/.metro-cache](frontend/.metro-cache) contains bundled runtime files with the same environment values.
-- [frontend/app.json](frontend/app.json) includes an Android Maps key.
-- [frontend/app/rider/request.tsx](frontend/app/rider/request.tsx) fetches Google Maps Geocoding directly from the client using an embedded key.
-
-Why this matters:
-- Client-side keys are inherently more exposed than backend-only keys.
-- Exposed keys are easy to copy from a built app or public bundle.
-- This can lead to quota exhaustion, unexpected API charges, and unauthorized use.
-
-Recommended fix:
-- Remove keys from native app config and client bundles.
-- Use backend API proxies for Google Maps wrappers.
-- Keep public keys only where the platform requires them, and use restrictive usage rules.
-
----
-
-### 6) Dependency vulnerabilities in frontend packages
-
-High risk / current evidence from package audit.
-
-Evidence:
-- `npm audit --audit-level=low --json` returned exit code 1.
-- Summary from the run: 38 vulnerabilities total.
-- Breakdown: 1 critical, 10 high, 26 moderate, 1 low.
-
-The vulnerable surface is broad and includes Expo tooling packages and dependency graphs that are likely used in app builds and packaging.
-
-Why this matters:
-- These vulnerabilities can affect local development, build pipelines, and production app delivery.
-- Exposed toolchain issues can create supply-chain or build-time compromise paths.
-
-Recommended fix:
-- Upgrade Expo and related tooling to patched versions.
-- Run `npm audit fix` or a controlled dependency update plan.
-- Review lockfile changes and verify that the app still builds after upgrades.
-- Consider pinning or auditing transitive dependencies used in production builds.
-
----
-
-### 7) Local developer artifacts and generated build caches may leak environment values
-
-Medium risk.
-
-Evidence:
-- [frontend/.expo](frontend/.expo) and [frontend/.metro-cache](frontend/.metro-cache) contain generated runtime artifacts.
-- These folders have been used to cache environment variables and app config.
-
-Why this matters:
-- Build artifacts can preserve secrets even after the source files are cleaned up.
-- Secret leakage often occurs through logs, cache folders, and temporary files.
-
-Recommended fix:
-- Add cache cleanup to CI/developer flow.
-- Remove generated artifacts from version control or exclude them aggressively.
-- Rotate any secrets found in cached output.
-
----
-
-## Observed Positive Notes
-
-- The backend syntax check succeeded: there is no immediate Python compile-time breakage in [backend/server.py](backend/server.py).
-- The repository root [.gitignore](.gitignore) includes `.env` entries, which is helpful, but the secret-bearing files were still present in the working tree and are therefore not sufficient as a protection measure.
-
-## Recommended Remediation Order
-
-1. Rotate all leaked keys and secrets immediately.
-2. Remove secrets from repo-tracked files and generated caches.
-3. Enforce authentication and authorization on all protected routes.
-4. Replace wildcard CORS with an explicit allowlist.
-5. Move Google Maps and PayPal calls behind backend-only proxies.
-6. Upgrade dependency tree and address the npm audit findings.
-7. Add startup validation and environment separation for dev/staging/prod.
-
-## Conclusion
-
-The project has a clear security and configuration gap. The most urgent action is to rotate and remove live secrets, then lock down API access with real authentication and safe CORS settings. The dependency audit also indicates the frontend toolchain should be updated before it is used in a production build pipeline.
+See [Google Maps security guidance](https://developers.google.com/maps/api-security-best-practices) and [Expo app configuration](https://docs.expo.dev/workflow/configuration/).
