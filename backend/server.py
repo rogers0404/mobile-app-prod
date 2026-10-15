@@ -58,6 +58,7 @@ active_connections: Dict[str, WebSocket] = {}
 in_memory_users: Dict[str, Dict[str, Any]] = {}
 in_memory_driver_status: Dict[str, Dict[str, Any]] = {}
 in_memory_driver_documents: Dict[str, Dict[str, Any]] = {}
+in_memory_driver_locations: Dict[str, Dict[str, Any]] = {}
 
 # =========================
 # Pydantic Models
@@ -507,16 +508,21 @@ async def update_location(data: DriverLocation):
     if user.get("user_type") != "driver":
         raise HTTPException(status_code=403, detail="Only drivers can update location")
     
-    await db.driver_locations.update_one(
-        {"user_id": data.user_id},
-        {"$set": {
-            "user_id": data.user_id,
-            "latitude": data.latitude,
-            "longitude": data.longitude,
-            "updated_at": datetime.now(timezone.utc)
-        }},
-        upsert=True
-    )
+    location = {
+        "user_id": data.user_id,
+        "latitude": data.latitude,
+        "longitude": data.longitude,
+        "updated_at": datetime.now(timezone.utc)
+    }
+
+    try:
+        await db.driver_locations.update_one(
+            {"user_id": data.user_id},
+            {"$set": location},
+            upsert=True
+        )
+    except Exception:
+        in_memory_driver_locations[data.user_id] = location
     
     return {"message": "Location updated"}
 
@@ -593,19 +599,30 @@ async def get_driver_active_ride(user_id: str):
 async def get_nearby_drivers(latitude: float, longitude: float, radius: float = 10):
     """Get nearby online drivers"""
     # Get all online drivers
-    online_drivers = await db.driver_status.find(
-        {"is_online": True, "is_verified": True},
-        {"_id": 0}
-    ).to_list(100)
+    try:
+        online_drivers = await db.driver_status.find(
+            {"is_online": True, "is_verified": True},
+            {"_id": 0}
+        ).to_list(100)
+        use_memory = False
+    except Exception:
+        online_drivers = [
+            driver for driver in in_memory_driver_status.values()
+            if driver.get("is_online") and driver.get("is_verified")
+        ]
+        use_memory = True
     
     nearby_drivers = []
     
     for driver in online_drivers:
         # Get driver location
-        location = await db.driver_locations.find_one(
-            {"user_id": driver["user_id"]},
-            {"_id": 0}
-        )
+        if use_memory:
+            location = in_memory_driver_locations.get(driver["user_id"])
+        else:
+            location = await db.driver_locations.find_one(
+                {"user_id": driver["user_id"]},
+                {"_id": 0}
+            )
         
         if location:
             distance = calculate_distance(
@@ -615,16 +632,22 @@ async def get_nearby_drivers(latitude: float, longitude: float, radius: float = 
             
             if distance <= radius:
                 # Get driver info
-                driver_info = await db.users.find_one(
-                    {"user_id": driver["user_id"]},
-                    {"_id": 0}
-                )
+                if use_memory:
+                    driver_info = in_memory_users.get(driver["user_id"])
+                else:
+                    driver_info = await db.users.find_one(
+                        {"user_id": driver["user_id"]},
+                        {"_id": 0}
+                    )
                 
                 # Get vehicle info
-                vehicle = await db.driver_documents.find_one(
-                    {"user_id": driver["user_id"]},
-                    {"_id": 0, "license_data": 0, "insurance_data": 0}
-                )
+                if use_memory:
+                    vehicle = in_memory_driver_documents.get(driver["user_id"])
+                else:
+                    vehicle = await db.driver_documents.find_one(
+                        {"user_id": driver["user_id"]},
+                        {"_id": 0, "license_data": 0, "insurance_data": 0}
+                    )
                 
                 nearby_drivers.append({
                     "user_id": driver["user_id"],
