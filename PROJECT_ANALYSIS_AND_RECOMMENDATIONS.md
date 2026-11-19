@@ -1,5 +1,7 @@
 # Project Analysis and Recommendations
 
+> Historical planning document. Configuration and security assertions below may be outdated. See [current security status](SECURITY_AUDIT_FINDINGS.md) for the 2026-10-15 review; the AWS plan is a proposal, not the active runtime.
+
 ## 1. Summary
 This project is a prototype ride-share app with a FastAPI backend and an Expo React Native frontend. It contains a working feature set for users, drivers, payments, maps, and ride tracking, but it is not yet production-ready because of security, architecture, and environment-management gaps.
 

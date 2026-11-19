@@ -4,6 +4,25 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 
 ## Get started
 
+Copy `.env.example` to `.env` and fill the required values locally before starting
+Expo. Keep `.env` untracked. `EXPO_PUBLIC_*` values are included in client code;
+never put PayPal secrets, database credentials, or private server keys there.
+
+`app.config.js` reads `GOOGLE_MAPS_ANDROID_API_KEY` and the optional
+`GOOGLE_MAPS_IOS_API_KEY` for native Maps configuration. Use separate restricted
+keys for each platform. Rebuild the native app after changing native keys; an
+Expo Go session does not validate a standalone app's native key configuration.
+If a native key is absent, its Maps configuration is omitted, so a standalone
+Google Maps integration requires that key to be supplied at build time.
+
+`EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` serves existing client Maps/Geocoding calls.
+Do not assume Android, iOS, web, and server restrictions are interchangeable.
+See [security status and remaining provider actions](../SECURITY_AUDIT_FINDINGS.md).
+
+For backend development, copy `backend/.env.example` to `backend/.env` from the
+repository root and configure local services. Do not overwrite existing local
+environment files when following this setup.
+
 1. Install dependencies
 
    ```bash

@@ -16,6 +16,7 @@
 .env
 .env.*
 *.env
+!.env.example
 credentials.json
 *token.json*
 *.pem
@@ -56,6 +57,7 @@ out/
 *.tsbuildinfo
 .cache/
 frontend/.metro-cache/
+frontend/.expo/
 
 # Project-specific ignores
 FOR-DELETION/
