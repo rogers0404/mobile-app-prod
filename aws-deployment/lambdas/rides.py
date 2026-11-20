@@ -76,7 +76,7 @@ def nearby_drivers(qs):
 
     result = []
     for driver in online:
-        loc = table('driver_locations').get_item(Key={'user_id': driver['user_id']}).get('Item')
+        loc = table('driver_locations').get_item(Key={'driver_id': driver['user_id']}).get('Item')
         if not loc:
             continue
         dist = _haversine(lat, lon, float(loc['latitude']), float(loc['longitude']))
@@ -137,7 +137,7 @@ def accept_ride(body):
     user_id = body.get('user_id')
     ride_id = body.get('ride_id')
 
-    driver_status = table('driver_status').get_item(Key={'user_id': user_id}).get('Item', {})
+    driver_status = table('driver_status').get_item(Key={'driver_id': user_id}).get('Item', {})
     if not driver_status.get('is_online'):
         return err('Must be online to accept rides', 403)
     if not driver_status.get('is_verified'):

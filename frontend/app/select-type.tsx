@@ -21,18 +21,17 @@ export default function SelectTypeScreen() {
   const handleSelectType = async (type: 'rider' | 'driver') => {
     setIsLoading(true);
     try {
-      const user = await createUser(type);
-      if (user) {
-        if (type === 'rider') {
-          router.replace('/rider');
-        } else {
-          router.replace('/driver');
-        }
+      await createUser(type);
+      if (type === 'rider') {
+        router.replace('/rider');
       } else {
-        Alert.alert('Error', 'Failed to create user. Please try again.');
+        router.replace('/driver');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to set user type. Please try again.');
+      Alert.alert(
+        'Error',
+        error instanceof Error ? error.message : 'Failed to create user. Please try again.'
+      );
     } finally {
       setIsLoading(false);
     }

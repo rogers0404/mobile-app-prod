@@ -63,6 +63,7 @@ def upload_documents(body):
 
     now = datetime.now(timezone.utc).isoformat()
     item = {
+        'driver_id': user_id,
         'user_id': user_id,
         'license_data': body.get('license_data'),
         'insurance_data': body.get('insurance_data'),
@@ -76,7 +77,7 @@ def upload_documents(body):
     }
     table('driver_documents').put_item(Item=item)
     table('driver_status').update_item(
-        Key={'user_id': user_id},
+        Key={'driver_id': user_id},
         UpdateExpression='SET is_verified = :v, updated_at = :t',
         ExpressionAttributeValues={':v': True, ':t': now},
     )
@@ -90,6 +91,7 @@ def update_location(body):
         return e
 
     table('driver_locations').put_item(Item={
+        'driver_id': user_id,
         'user_id': user_id,
         'latitude': body.get('latitude'),
         'longitude': body.get('longitude'),
@@ -104,12 +106,12 @@ def update_status(body):
     if e:
         return e
 
-    status = table('driver_status').get_item(Key={'user_id': user_id}).get('Item', {})
+    status = table('driver_status').get_item(Key={'driver_id': user_id}).get('Item', {})
     if not status.get('is_verified'):
         return err('Driver not verified. Upload documents first.', 403)
 
     table('driver_status').update_item(
-        Key={'user_id': user_id},
+        Key={'driver_id': user_id},
         UpdateExpression='SET is_online = :o, updated_at = :t',
         ExpressionAttributeValues={
             ':o': body.get('is_online', False),
@@ -123,7 +125,7 @@ def get_documents(user_id):
     _, e = _require_driver(user_id)
     if e:
         return e
-    docs = table('driver_documents').get_item(Key={'user_id': user_id}).get('Item', {})
+    docs = table('driver_documents').get_item(Key={'driver_id': user_id}).get('Item', {})
     return ok(docs)
 
 
@@ -131,7 +133,7 @@ def get_status(user_id):
     _, e = _require_driver(user_id)
     if e:
         return e
-    status = table('driver_status').get_item(Key={'user_id': user_id}).get('Item', {})
+    status = table('driver_status').get_item(Key={'driver_id': user_id}).get('Item', {})
     return ok(status or {'is_online': False, 'is_verified': False})
 
 

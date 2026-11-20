@@ -57,6 +57,7 @@ def create_user(body):
 
     if user_type == 'driver':
         table('driver_status').put_item(Item={
+            'driver_id': user_id,
             'user_id': user_id,
             'is_online': False,
             'is_verified': False,
@@ -73,8 +74,8 @@ def get_user(user_id):
         return err('User not found', 404)
 
     if user.get('user_type') == 'driver':
-        status = table('driver_status').get_item(Key={'user_id': user_id}).get('Item', {})
-        docs = table('driver_documents').get_item(Key={'user_id': user_id}).get('Item', {})
+        status = table('driver_status').get_item(Key={'driver_id': user_id}).get('Item', {})
+        docs = table('driver_documents').get_item(Key={'driver_id': user_id}).get('Item', {})
         user['driver_status'] = status
         user['documents'] = docs
 
@@ -109,8 +110,8 @@ def delete_user(user_id):
     table('users').delete_item(Key={'user_id': user_id})
 
     if user.get('user_type') == 'driver':
-        table('driver_status').delete_item(Key={'user_id': user_id})
-        table('driver_documents').delete_item(Key={'user_id': user_id})
-        table('driver_locations').delete_item(Key={'user_id': user_id})
+        table('driver_status').delete_item(Key={'driver_id': user_id})
+        table('driver_documents').delete_item(Key={'driver_id': user_id})
+        table('driver_locations').delete_item(Key={'driver_id': user_id})
 
     return ok({'message': 'Account deleted'})

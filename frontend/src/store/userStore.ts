@@ -21,7 +21,7 @@ interface UserState {
   isLoading: boolean;
   setUser: (user: User | null) => void;
   setLoading: (loading: boolean) => void;
-  createUser: (userType: 'rider' | 'driver', name?: string) => Promise<User | null>;
+  createUser: (userType: 'rider' | 'driver', name?: string) => Promise<User>;
   loadUser: () => Promise<User | null>;
   refreshProfile: () => Promise<void>;
   clearUser: () => Promise<void>;
@@ -48,19 +48,38 @@ export const useUserStore = create<UserState>((set, get) => ({
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create user');
+        let detail = '';
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          try {
+            const body = await response.json();
+            if (typeof body.detail === 'string') {
+              detail = body.detail;
+            } else if (typeof body.error === 'string') {
+              detail = body.error;
+            } else if (typeof body.message === 'string') {
+              detail = body.message;
+            }
+          } catch (error) {
+            console.error('Failed to read create user error response:', error);
+          }
+        }
+        throw new Error(
+          `Failed to create user (HTTP ${response.status})${detail ? `: ${detail}` : ''}`
+        );
       }
 
       const user = await response.json();
       await AsyncStorage.setItem('user_id', user.user_id);
       await AsyncStorage.setItem('user_type', userType);
       
-      set({ user, isLoading: false });
+      set({ user });
       return user;
     } catch (error) {
       console.error('Create user error:', error);
+      throw error;
+    } finally {
       set({ isLoading: false });
-      return null;
     }
   },
 

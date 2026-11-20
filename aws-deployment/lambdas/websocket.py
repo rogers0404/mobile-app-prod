@@ -54,6 +54,7 @@ def _message(connection_id, user_id, raw_body):
     if data.get('type') == 'location_update':
         now = datetime.now(timezone.utc).isoformat()
         table('driver_locations').put_item(Item={
+            'driver_id': user_id,
             'user_id': user_id,
             'latitude': data.get('latitude'),
             'longitude': data.get('longitude'),
