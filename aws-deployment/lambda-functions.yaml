@@ -32,6 +32,11 @@ Parameters:
     Type: String
     Description: S3 bucket name where Lambda deployment packages are uploaded
 
+  ApiGatewayId:
+    Type: String
+    Default: dzk2lr8j09
+    Description: API Gateway ID from the infra stack
+
 Resources:
 
   # ============ IAM Role ============
@@ -529,6 +534,240 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       AlarmActions:
         - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:trip-alerts
+
+  # ============ API Gateway Integrations ============
+
+  UsersIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UsersFunction.Arn}/invocations
+      PayloadFormatVersion: '2.0'
+
+  DriverIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DriverFunction.Arn}/invocations
+      PayloadFormatVersion: '2.0'
+
+  RidesIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RidesFunction.Arn}/invocations
+      PayloadFormatVersion: '2.0'
+
+  PaymentsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PaymentsFunction.Arn}/invocations
+      PayloadFormatVersion: '2.0'
+
+  PlacesIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PlacesFunction.Arn}/invocations
+      PayloadFormatVersion: '2.0'
+
+  WebSocketIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketFunction.Arn}/invocations
+      PayloadFormatVersion: '2.0'
+
+  # ============ API Gateway Routes ============
+
+  RouteUsersCreate:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/users/create
+      Target: !Sub integrations/${UsersIntegration}
+
+  RouteUsersGet:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/users/{user_id}
+      Target: !Sub integrations/${UsersIntegration}
+
+  RouteUsersPut:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: PUT /api/users/{user_id}
+      Target: !Sub integrations/${UsersIntegration}
+
+  RouteUsersDelete:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: DELETE /api/users/{user_id}
+      Target: !Sub integrations/${UsersIntegration}
+
+  RouteDriverDocumentsPost:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/driver/documents
+      Target: !Sub integrations/${DriverIntegration}
+
+  RouteDriverLocationPost:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/driver/location
+      Target: !Sub integrations/${DriverIntegration}
+
+  RouteDriverStatusPost:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/driver/status
+      Target: !Sub integrations/${DriverIntegration}
+
+  RouteDriverDocumentsGet:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/driver/{user_id}/documents
+      Target: !Sub integrations/${DriverIntegration}
+
+  RouteDriverStatusGet:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/driver/{user_id}/status
+      Target: !Sub integrations/${DriverIntegration}
+
+  RouteDriverPendingRides:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/driver/{user_id}/pending-rides
+      Target: !Sub integrations/${DriverIntegration}
+
+  RouteDriverActiveRide:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/driver/{user_id}/active-ride
+      Target: !Sub integrations/${DriverIntegration}
+
+  RouteDriverEarnings:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/driver/{user_id}/earnings
+      Target: !Sub integrations/${DriverIntegration}
+
+  RouteNearbyDrivers:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/rider/nearby-drivers
+      Target: !Sub integrations/${RidesIntegration}
+
+  RouteRidesRequest:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/rides/request
+      Target: !Sub integrations/${RidesIntegration}
+
+  RouteRidesAccept:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/rides/accept
+      Target: !Sub integrations/${RidesIntegration}
+
+  RouteRidesUpdateStatus:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/rides/update-status
+      Target: !Sub integrations/${RidesIntegration}
+
+  RouteRidesRate:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/rides/rate
+      Target: !Sub integrations/${RidesIntegration}
+
+  RouteRidesActive:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/rides/{user_id}/active
+      Target: !Sub integrations/${RidesIntegration}
+
+  RouteRidesHistory:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/rides/{user_id}/history
+      Target: !Sub integrations/${RidesIntegration}
+
+  RouteRidesDetails:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/rides/details/{ride_id}
+      Target: !Sub integrations/${RidesIntegration}
+
+  RoutePaymentCreate:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/payment/create-order
+      Target: !Sub integrations/${PaymentsIntegration}
+
+  RoutePaymentCapture:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: POST /api/payment/capture-order
+      Target: !Sub integrations/${PaymentsIntegration}
+
+  RoutePlacesSearch:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/places/search
+      Target: !Sub integrations/${PlacesIntegration}
+
+  RoutePlacesDetails:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/places/details
+      Target: !Sub integrations/${PlacesIntegration}
+
+  RouteDirections:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/directions
+      Target: !Sub integrations/${PlacesIntegration}
+
+  RouteWebSocket:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGatewayId
+      RouteKey: GET /api/ws/{user_id}
+      Target: !Sub integrations/${WebSocketIntegration}
 
 Outputs:
   UsersFunctionArn:
