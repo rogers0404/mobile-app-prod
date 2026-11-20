@@ -5,14 +5,14 @@
   },
   {
     "ParameterKey": "PayPalClientId",
-    "ParameterValue": "Aa4nbnwrjDoXu8sMByKts9p2ulJ-YhB815CrJl6Pw5Vt0vqlcNi6RANSHHkVvnhU7A2W5Xv3XthtSJPs"
+    "ParameterValue": "YOUR_PAYPAL_CLIENT_ID_HERE"
   },
   {
     "ParameterKey": "PayPalSecret",
-    "ParameterValue": "EMHV6aFm93J62O4wcsomipykrROQuVdo64dl_f6XUEtXYnMfM7oGdok8_iQEkYxT8aFpGNUsgrNWaFaL"
+    "ParameterValue": "YOUR_PAYPAL_SECRET_HERE"
   },
   {
     "ParameterKey": "GoogleMapsKey",
-    "ParameterValue": "AIzaSyB5hxVJTIHLbLknEzoG2rv3JZdjwiCWj58"
+    "ParameterValue": "YOUR_GOOGLE_MAPS_API_KEY_HERE"
   }
 ]
