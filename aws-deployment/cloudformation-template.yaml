@@ -13,40 +13,6 @@ Parameters:
 Resources:
   # ============ IAM Roles ============
 
-  S3ReplicationRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: trip-s3-replication-role
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: s3.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: S3ReplicationPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetReplicationConfiguration
-                  - s3:ListBucket
-                Resource: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}
-              - Effect: Allow
-                Action:
-                  - s3:GetObjectVersionForReplication
-                  - s3:GetObjectVersionAcl
-                  - s3:GetObjectVersionTagging
-                Resource: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}/*
-              - Effect: Allow
-                Action:
-                  - s3:ReplicateObject
-                  - s3:ReplicateDelete
-                  - s3:ReplicateTags
-                Resource: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}-replica/*
-
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -72,8 +38,13 @@ Resources:
                   - !GetAtt UsersTable.Arn
                   - !GetAtt RidesTable.Arn
                   - !GetAtt PaymentsTable.Arn
+                  - !GetAtt DriverStatusTable.Arn
+                  - !GetAtt DriverLocationsTable.Arn
+                  - !GetAtt DriverDocumentsTable.Arn
+                  - !GetAtt WsConnectionsTable.Arn
                   - !Sub ${UsersTable.Arn}/index/*
                   - !Sub ${RidesTable.Arn}/index/*
+                  - !Sub ${PaymentsTable.Arn}/index/*
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'
@@ -213,25 +184,110 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+  DriverStatusTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Environment}_driver_status
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: alias/aws/dynamodb
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: driver_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: driver_id
+          KeyType: HASH
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  DriverLocationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Environment}_driver_locations
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: alias/aws/dynamodb
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: driver_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: driver_id
+          KeyType: HASH
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  DriverDocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Environment}_driver_documents
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: alias/aws/dynamodb
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: driver_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: driver_id
+          KeyType: HASH
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  WsConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Environment}_ws_connections
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: alias/aws/dynamodb
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: connection_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connection_id
+          KeyType: HASH
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
   # ============ S3 Buckets ============
 
   DocumentsBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub trip-documents-${AWS::AccountId}-${Environment}
-      ObjectLockEnabled: true
       VersioningConfiguration:
         Status: Enabled
-      ReplicationConfiguration:
-        Role: !GetAtt S3ReplicationRole.Arn
-        Rules:
-          - Id: ReplicateAll
-            Status: Enabled
-            Destination:
-              Bucket: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}-replica
-              StorageClass: STANDARD_IA
-            Filter:
-              Prefix: ''
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -297,7 +353,6 @@ Resources:
       Name: !Sub trip-${Environment}
       ProtocolType: HTTP
       CorsConfiguration:
-        AllowCredentials: true
         AllowOrigins:
           - '*'
         AllowMethods:
@@ -311,13 +366,14 @@ Resources:
 
   ApiStage:
     Type: AWS::ApiGatewayV2::Stage
+    DependsOn: ApiLogGroup
     Properties:
       ApiId: !Ref ApiGateway
       StageName: !Ref Environment
       AutoDeploy: true
       AccessLogSettings:
         DestinationArn: !GetAtt ApiLogGroup.Arn
-        Format: $context.requestId $context.error.message $context.error.messageString
+        Format: '$context.requestId $context.error.message $context.error.messageString'
       DefaultRouteSettings:
         ThrottlingBurstLimit: 100
         ThrottlingRateLimit: 50
@@ -352,7 +408,9 @@ Resources:
         - Name: name
           AttributeDataType: String
           Mutable: true
-      MfaConfiguration: OPTIONAL
+      AutoVerifiedAttributes:
+        - email
+      MfaConfiguration: 'OFF'
       UserAttributeUpdateSettings:
         AttributesRequireVerificationBeforeUpdate:
           - email
@@ -378,10 +436,15 @@ Resources:
         - phone_number
       ExplicitAuthFlows:
         - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
       RefreshTokenValidity: 30
       AccessTokenValidity: 1
       IdTokenValidity: 1
+      TokenValidityUnits:
+        RefreshToken: days
+        AccessToken: hours
+        IdToken: hours
 
   # ============ SNS Topic ============
 

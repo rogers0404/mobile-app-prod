@@ -32,8 +32,6 @@ Parameters:
     Type: String
     Description: S3 bucket name where Lambda deployment packages are uploaded
 
-Globals: {}
-
 Resources:
 
   # ============ IAM Role ============
@@ -406,7 +404,7 @@ Resources:
     Type: AWS::Lambda::EventSourceMapping
     Properties:
       EventSourceArn: !GetAtt RideRequestsQueue.Arn
-      FunctionName: !GetAtt RidesFunction.Arn
+      FunctionName: !GetAtt NotificationsFunction.Arn
       BatchSize: 5
       Enabled: true
 
