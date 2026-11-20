@@ -98,3 +98,4 @@ test/
 FOR-DELETION/
 aws-serverless-refactor/
 backend/.env
+frontend/.env.local
