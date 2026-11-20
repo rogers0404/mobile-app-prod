@@ -74,6 +74,7 @@ backend_test_no_auth.py
 
 # Deployment
 .vercel
+aws-deployment/parameters.json
 
 # Data and databases
 agenthub/agents/youtube/db

@@ -25,6 +25,40 @@ Parameters:
 Resources:
   # ============ IAM Roles ============
 
+  S3ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: trip-s3-replication-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReplicationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetReplicationConfiguration
+                  - s3:ListBucket
+                Resource: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}
+              - Effect: Allow
+                Action:
+                  - s3:GetObjectVersionForReplication
+                  - s3:GetObjectVersionAcl
+                  - s3:GetObjectVersionTagging
+                Resource: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}/*
+              - Effect: Allow
+                Action:
+                  - s3:ReplicateObject
+                  - s3:ReplicateDelete
+                  - s3:ReplicateTags
+                Resource: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}-replica/*
+
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -68,7 +102,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
-                Resource: !GetAtt PayPalSecretsManagerSecret.Arn
+                Resource:
+                  - !Ref PayPalSecretsManagerSecret
+                  - !Ref GoogleMapsSecret
 
   # ============ Secrets Manager ============
 
@@ -77,11 +113,7 @@ Resources:
     Properties:
       Name: paypal-credentials
       Description: PayPal API credentials
-      SecretString: !Sub |
-        {
-          "client_id": "${PayPalClientId}",
-          "secret": "${PayPalSecret}"
-        }
+      SecretString: !Sub '{"client_id":"${PayPalClientId}","secret":"${PayPalSecret}"}'
       KmsKeyId: alias/aws/secretsmanager
 
   GoogleMapsSecret:
@@ -89,10 +121,7 @@ Resources:
     Properties:
       Name: google-maps-api-key
       Description: Google Maps API key
-      SecretString: !Sub |
-        {
-          "api_key": "${GoogleMapsKey}"
-        }
+      SecretString: !Sub '{"api_key":"${GoogleMapsKey}"}'
       KmsKeyId: alias/aws/secretsmanager
 
   # ============ DynamoDB Tables ============
@@ -108,6 +137,9 @@ Resources:
         KMSMasterKeyId: alias/aws/dynamodb
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -136,6 +168,11 @@ Resources:
         SSEEnabled: true
         SSEType: KMS
         KMSMasterKeyId: alias/aws/dynamodb
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
       AttributeDefinitions:
@@ -178,6 +215,11 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
       AttributeDefinitions:
         - AttributeName: payment_id
           AttributeType: S
@@ -207,8 +249,19 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub trip-documents-${AWS::AccountId}-${Environment}
+      ObjectLockEnabled: true
       VersioningConfiguration:
         Status: Enabled
+      ReplicationConfiguration:
+        Role: !GetAtt S3ReplicationRole.Arn
+        Rules:
+          - Id: ReplicateAll
+            Status: Enabled
+            Destination:
+              Bucket: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}-replica
+              StorageClass: STANDARD_IA
+            Filter:
+              Prefix: ''
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -222,8 +275,10 @@ Resources:
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldVersions
+            Status: Enabled
             NoncurrentVersionExpirationInDays: 30
           - Id: DeleteOldLogs
+            Status: Enabled
             Prefix: logs/
             ExpirationInDays: 90
       Tags:
@@ -234,7 +289,7 @@ Resources:
     Type: AWS::S3::BucketPolicy
     Properties:
       Bucket: !Ref DocumentsBucket
-      PolicyText:
+      PolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Sid: AllowLambdaUpload
@@ -253,6 +308,16 @@ Resources:
             Condition:
               StringNotEquals:
                 s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyNonSSLRequests
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !Sub ${DocumentsBucket.Arn}
+              - !Sub ${DocumentsBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
 
   # ============ API Gateway ============
 
@@ -283,9 +348,9 @@ Resources:
       AccessLogSettings:
         DestinationArn: !GetAtt ApiLogGroup.Arn
         Format: $context.requestId $context.error.message $context.error.messageString
-      ThrottleSettings:
-        BurstLimit: 100
-        RateLimit: 50
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
 
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
@@ -319,7 +384,7 @@ Resources:
           Mutable: true
       MfaConfiguration: OPTIONAL
       UserAttributeUpdateSettings:
-        AttributesRequiringVerificationBeforeUpdate:
+        AttributesRequireVerificationBeforeUpdate:
           - email
       EmailConfiguration:
         EmailSendingAccount: COGNITO_DEFAULT
@@ -355,13 +420,14 @@ Resources:
     Properties:
       TopicName: trip-alerts
       DisplayName: !Sub Trip Ride-Share Alerts - ${Environment}
+      KmsMasterKeyId: alias/aws/sns
 
   AlertsTopicPolicy:
     Type: AWS::SNS::TopicPolicy
     Properties:
       Topics:
         - !Ref AlertsTopic
-      PolicyText:
+      PolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
@@ -382,6 +448,7 @@ Resources:
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
+      DatapointsToAlarm: 1
       Threshold: 10
       ComparisonOperator: GreaterThanThreshold
       AlarmActions:
