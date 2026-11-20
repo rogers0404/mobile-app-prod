@@ -98,4 +98,9 @@ test/
 FOR-DELETION/
 aws-serverless-refactor/
 backend/.env
+backend/.env.example
 frontend/.env.local
+frontend/.env.example
+aws-deployment/parameters.json
+aws-deployment/.env.*
+aws-deployment/parameters-example.json
