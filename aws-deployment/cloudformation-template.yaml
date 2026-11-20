@@ -10,18 +10,6 @@ Parameters:
       - staging
       - production
 
-  PayPalClientId:
-    Type: String
-    NoEcho: true
-
-  PayPalSecret:
-    Type: String
-    NoEcho: true
-
-  GoogleMapsKey:
-    Type: String
-    NoEcho: true
-
 Resources:
   # ============ IAM Roles ============
 
@@ -103,26 +91,8 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - !Ref PayPalSecretsManagerSecret
-                  - !Ref GoogleMapsSecret
-
-  # ============ Secrets Manager ============
-
-  PayPalSecretsManagerSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: paypal-credentials
-      Description: PayPal API credentials
-      SecretString: !Sub '{"client_id":"${PayPalClientId}","secret":"${PayPalSecret}"}'
-      KmsKeyId: alias/aws/secretsmanager
-
-  GoogleMapsSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: google-maps-api-key
-      Description: Google Maps API key
-      SecretString: !Sub '{"api_key":"${GoogleMapsKey}"}'
-      KmsKeyId: alias/aws/secretsmanager
+                  - arn:aws:secretsmanager:us-east-1:024811758557:secret:trip-paypal-credentials-production-msMsK6
+                  - arn:aws:secretsmanager:us-east-1:024811758557:secret:trip-google-maps-key-production-Wimr72
 
   # ============ DynamoDB Tables ============
 
@@ -478,3 +448,11 @@ Outputs:
   DocumentsBucketName:
     Value: !Ref DocumentsBucket
     Description: S3 Documents bucket name
+
+  PayPalSecretArn:
+    Value: arn:aws:secretsmanager:us-east-1:024811758557:secret:trip-paypal-credentials-production-msMsK6
+    Description: PayPal credentials secret ARN
+
+  GoogleMapsSecretArn:
+    Value: arn:aws:secretsmanager:us-east-1:024811758557:secret:trip-google-maps-key-production-Wimr72
+    Description: Google Maps API key secret ARN

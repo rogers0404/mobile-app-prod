@@ -1,0 +1,574 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Trip Ride-Share Lambda Functions
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  PayPalSecretArn:
+    Type: String
+    Default: arn:aws:secretsmanager:us-east-1:024811758557:secret:trip-paypal-credentials-production-msMsK6
+    Description: ARN of the PayPal credentials secret in Secrets Manager
+
+  GoogleMapsSecretArn:
+    Type: String
+    Default: arn:aws:secretsmanager:us-east-1:024811758557:secret:trip-google-maps-key-production-Wimr72
+    Description: ARN of the Google Maps API key secret in Secrets Manager
+
+  CognitoUserPoolId:
+    Type: String
+    Description: Cognito User Pool ID from the main stack output
+
+  CognitoClientId:
+    Type: String
+    Description: Cognito User Pool Client ID from the main stack output
+
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket name where Lambda deployment packages are uploaded
+
+Globals: {}
+
+Resources:
+
+  # ============ IAM Role ============
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub trip-lambda-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_users
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_users/index/*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_rides
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_rides/index/*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_payments
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_payments/index/*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_driver_documents
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_driver_status
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Environment}_driver_locations
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::trip-documents-${AWS::AccountId}-${Environment}/*
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref PayPalSecretArn
+                  - !Ref GoogleMapsSecretArn
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt RideRequestsQueue.Arn
+                  - !GetAtt PaymentProcessingQueue.Arn
+                  - !GetAtt NotificationQueue.Arn
+        - PolicyName: SNSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:trip-alerts
+        - PolicyName: CognitoAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminInitiateAuth
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminSetUserPassword
+                  - cognito-idp:AdminGetUser
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+        - PolicyName: APIGatewayManageConnections
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/@connections/*
+
+  # ============ SQS Queues ============
+
+  RideRequestsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub trip-ride-requests-${Environment}
+      VisibilityTimeout: 30
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt RideRequestsDLQ.Arn
+        maxReceiveCount: 3
+
+  RideRequestsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub trip-ride-requests-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+
+  PaymentProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub trip-payment-processing-${Environment}
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 604800
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PaymentProcessingDLQ.Arn
+        maxReceiveCount: 3
+
+  PaymentProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub trip-payment-processing-dlq-${Environment}
+      MessageRetentionPeriod: 604800
+
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub trip-notifications-${Environment}
+      VisibilityTimeout: 30
+      MessageRetentionPeriod: 86400
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotificationDLQ.Arn
+        maxReceiveCount: 3
+
+  NotificationDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub trip-notifications-dlq-${Environment}
+      MessageRetentionPeriod: 86400
+
+  # ============ CloudWatch Log Groups ============
+
+  UsersLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/trip-users-${Environment}
+      RetentionInDays: 30
+
+  DriverLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/trip-driver-${Environment}
+      RetentionInDays: 30
+
+  RidesLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/trip-rides-${Environment}
+      RetentionInDays: 30
+
+  PaymentsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/trip-payments-${Environment}
+      RetentionInDays: 30
+
+  PlacesLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/trip-places-${Environment}
+      RetentionInDays: 30
+
+  WebSocketLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/trip-websocket-${Environment}
+      RetentionInDays: 30
+
+  NotificationsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/trip-notifications-${Environment}
+      RetentionInDays: 30
+
+  # ============ Lambda Functions ============
+
+  # --- Users: POST /api/users/create, GET/PUT/DELETE /api/users/{user_id} ---
+  UsersFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: UsersLogGroup
+    Properties:
+      FunctionName: !Sub trip-users-${Environment}
+      Description: Handles user create, get, update, delete
+      Runtime: python3.11
+      Handler: users.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub ${Environment}/users.zip
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DYNAMODB_TABLE_PREFIX: !Sub ${Environment}_
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+      TracingConfig:
+        Mode: Active
+
+  # --- Driver: POST /api/driver/documents, /api/driver/location, /api/driver/status
+  #             GET  /api/driver/{user_id}/documents, /status, /pending-rides,
+  #                  /active-ride, /earnings ---
+  DriverFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: DriverLogGroup
+    Properties:
+      FunctionName: !Sub trip-driver-${Environment}
+      Description: Handles driver documents, location, status, earnings, pending/active rides
+      Runtime: python3.11
+      Handler: driver.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub ${Environment}/driver.zip
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DYNAMODB_TABLE_PREFIX: !Sub ${Environment}_
+          DOCUMENTS_BUCKET: !Sub trip-documents-${AWS::AccountId}-${Environment}
+      TracingConfig:
+        Mode: Active
+
+  # --- Rides: GET /api/rider/nearby-drivers
+  #            POST /api/rides/request, /accept, /update-status, /rate
+  #            GET  /api/rides/{user_id}/active, /history, /details/{ride_id} ---
+  RidesFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: RidesLogGroup
+    Properties:
+      FunctionName: !Sub trip-rides-${Environment}
+      Description: Handles ride request, accept, status updates, history, rating, nearby drivers
+      Runtime: python3.11
+      Handler: rides.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub ${Environment}/rides.zip
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DYNAMODB_TABLE_PREFIX: !Sub ${Environment}_
+          SQS_RIDE_QUEUE_URL: !Ref RideRequestsQueue
+      TracingConfig:
+        Mode: Active
+
+  # --- Payments: POST /api/payment/create-order, /capture-order ---
+  PaymentsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: PaymentsLogGroup
+    Properties:
+      FunctionName: !Sub trip-payments-${Environment}
+      Description: Handles PayPal order creation and capture
+      Runtime: python3.11
+      Handler: payments.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub ${Environment}/payments.zip
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DYNAMODB_TABLE_PREFIX: !Sub ${Environment}_
+          PAYPAL_SECRET_ARN: !Ref PayPalSecretArn
+          PAYPAL_BASE_URL: https://api-m.sandbox.paypal.com
+          SQS_PAYMENT_QUEUE_URL: !Ref PaymentProcessingQueue
+      TracingConfig:
+        Mode: Active
+
+  # --- Places: GET /api/places/search, /places/details, /directions ---
+  PlacesFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: PlacesLogGroup
+    Properties:
+      FunctionName: !Sub trip-places-${Environment}
+      Description: Proxy for Google Places Autocomplete, Place Details, and Directions APIs
+      Runtime: python3.11
+      Handler: places.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub ${Environment}/places.zip
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          GOOGLE_MAPS_SECRET_ARN: !Ref GoogleMapsSecretArn
+      TracingConfig:
+        Mode: Active
+
+  # --- WebSocket: /api/ws/{user_id} ---
+  WebSocketFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: WebSocketLogGroup
+    Properties:
+      FunctionName: !Sub trip-websocket-${Environment}
+      Description: Handles WebSocket connect, disconnect, and real-time location/ride updates
+      Runtime: python3.11
+      Handler: websocket.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub ${Environment}/websocket.zip
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DYNAMODB_TABLE_PREFIX: !Sub ${Environment}_
+      TracingConfig:
+        Mode: Active
+
+  # --- Notifications: SQS consumer for SMS/email/push ---
+  NotificationsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: NotificationsLogGroup
+    Properties:
+      FunctionName: !Sub trip-notifications-${Environment}
+      Description: Processes notification queue for SMS, email, and push notifications
+      Runtime: python3.11
+      Handler: notifications.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub ${Environment}/notifications.zip
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          SQS_NOTIFICATION_QUEUE_URL: !Ref NotificationQueue
+      TracingConfig:
+        Mode: Active
+
+  # ============ SQS → Lambda Event Source Mappings ============
+
+  RidesQueueTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt RideRequestsQueue.Arn
+      FunctionName: !GetAtt RidesFunction.Arn
+      BatchSize: 5
+      Enabled: true
+
+  NotificationsQueueTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt NotificationQueue.Arn
+      FunctionName: !GetAtt NotificationsFunction.Arn
+      BatchSize: 10
+      Enabled: true
+
+  PaymentsQueueTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt PaymentProcessingQueue.Arn
+      FunctionName: !GetAtt PaymentsFunction.Arn
+      BatchSize: 5
+      Enabled: true
+
+  # ============ Lambda Permissions for API Gateway ============
+
+  UsersApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt UsersFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
+
+  DriverApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DriverFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
+
+  RidesApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt RidesFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
+
+  PaymentsApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PaymentsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
+
+  PlacesApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PlacesFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
+
+  WebSocketApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt WebSocketFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
+
+  # ============ CloudWatch Alarms ============
+
+  UsersErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub trip-users-errors-${Environment}
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref UsersFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:trip-alerts
+
+  RidesErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub trip-rides-errors-${Environment}
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref RidesFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:trip-alerts
+
+  PaymentsErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub trip-payments-errors-${Environment}
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PaymentsFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:trip-alerts
+
+Outputs:
+  UsersFunctionArn:
+    Value: !GetAtt UsersFunction.Arn
+    Description: Users Lambda ARN
+
+  DriverFunctionArn:
+    Value: !GetAtt DriverFunction.Arn
+    Description: Driver Lambda ARN
+
+  RidesFunctionArn:
+    Value: !GetAtt RidesFunction.Arn
+    Description: Rides Lambda ARN
+
+  PaymentsFunctionArn:
+    Value: !GetAtt PaymentsFunction.Arn
+    Description: Payments Lambda ARN
+
+  PlacesFunctionArn:
+    Value: !GetAtt PlacesFunction.Arn
+    Description: Places Lambda ARN
+
+  WebSocketFunctionArn:
+    Value: !GetAtt WebSocketFunction.Arn
+    Description: WebSocket Lambda ARN
+
+  NotificationsFunctionArn:
+    Value: !GetAtt NotificationsFunction.Arn
+    Description: Notifications Lambda ARN
+
+  RideRequestsQueueUrl:
+    Value: !Ref RideRequestsQueue
+    Description: SQS URL for ride requests
+
+  PaymentProcessingQueueUrl:
+    Value: !Ref PaymentProcessingQueue
+    Description: SQS URL for payment processing
+
+  NotificationQueueUrl:
+    Value: !Ref NotificationQueue
+    Description: SQS URL for notifications
