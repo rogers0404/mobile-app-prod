@@ -17,7 +17,7 @@ Google Maps integration requires that key to be supplied at build time.
 
 `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` serves existing client Maps/Geocoding calls.
 Do not assume Android, iOS, web, and server restrictions are interchangeable.
-See [security status and remaining provider actions](../SECURITY_AUDIT_FINDINGS.md).
+See [security status and remaining provider actions](../documentation/BUGS.md#identity-and-access).
 
 For backend development, copy `backend/.env.example` to `backend/.env` from the
 repository root and configure local services. Do not overwrite existing local

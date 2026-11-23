@@ -165,14 +165,14 @@ elif [ $CHECKS_PASSED -ge 8 ]; then
     echo ""
     echo "Some optional components are missing:"
     echo "- Install missing dependencies before running"
-    echo "- See SETUP_AND_RUN_GUIDE.md for detailed instructions"
+    echo "- See documentation/GETTING_STARTED.md for detailed instructions"
     echo ""
 else
     echo -e "${RED}✗ NOT READY${NC}"
     echo ""
     echo "Critical components missing:"
     echo "- Install Node.js, Python 3, and Git"
-    echo "- See SETUP_AND_RUN_GUIDE.md for installation instructions"
+    echo "- See documentation/GETTING_STARTED.md for installation instructions"
     echo ""
 fi
 
