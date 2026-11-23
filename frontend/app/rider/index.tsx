@@ -20,17 +20,37 @@ const { width, height } = Dimensions.get('window');
 
 export default function RiderHomeScreen() {
   const router = useRouter();
-  const { user, loadUser, clearUser } = useUserStore();
+  const { user, loadUser, createUser, clearUser } = useUserStore();
   const { nearbyDrivers, activeRide, fetchNearbyDrivers, fetchActiveRide } = useRideStore();
   
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadUser();
-    initLocation();
-    fetchActiveRide();
+    const init = async () => {
+      try {
+        await initUser();
+        await initLocation();
+        await fetchActiveRide();
+      } catch (error) {
+        console.error('Initialization error:', error);
+      }
+    };
+    init();
   }, []);
+
+  const initUser = async () => {
+    try {
+      const loadedUser = await loadUser();
+      if (!loadedUser) {
+        // Create user if doesn't exist
+        await createUser('rider', 'Trip User');
+      }
+    } catch (error) {
+      console.error('User initialization error:', error);
+      Alert.alert('Error', 'Failed to initialize user account');
+    }
+  };
 
   useEffect(() => {
     if (location) {

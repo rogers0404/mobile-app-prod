@@ -433,7 +433,7 @@ export default function RideTrackingScreen() {
         {/* Fare */}
         <View style={styles.fareRow}>
           <Text style={styles.fareLabel}>Estimated Fare</Text>
-          <Text style={styles.fareAmount}>${activeRide.fare?.toFixed(2) || '0.00'}</Text>
+          <Text style={styles.fareAmount}>${typeof activeRide.fare === 'string' ? parseFloat(activeRide.fare).toFixed(2) : (activeRide.fare?.toFixed(2) || '0.00')}</Text>
         </View>
 
         {/* Cancel Button (only for pending/accepted) */}

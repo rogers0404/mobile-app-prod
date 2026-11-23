@@ -27,7 +27,7 @@ const { width } = Dimensions.get('window');
 
 export default function DriverHomeScreen() {
   const router = useRouter();
-  const { user, loadUser, clearUser } = useUserStore();
+  const { user, loadUser, createUser, clearUser } = useUserStore();
   const { isOnline, isVerified, fetchStatus, updateStatus, updateLocation } = useDriverStore();
   const { pendingRides, activeRide, fetchPendingRides, fetchActiveRide, acceptRide } = useRideStore();
   
@@ -142,7 +142,11 @@ export default function DriverHomeScreen() {
 
   const initDriver = async () => {
     try {
-      await loadUser();
+      const loadedUser = await loadUser();
+      if (!loadedUser) {
+        // Create user if doesn't exist
+        await createUser('driver', 'Trip Driver');
+      }
       await fetchStatus();
       await fetchActiveRide();
       await initLocation();

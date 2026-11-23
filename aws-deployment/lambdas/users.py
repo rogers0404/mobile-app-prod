@@ -19,13 +19,20 @@ def lambda_handler(event, context):
     method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method', 'GET'))
     path = event.get('path', event.get('rawPath', ''))
     path_params = event.get('pathParameters') or {}
+    qs = event.get('queryStringParameters') or {}
     body = json.loads(event.get('body') or '{}')
 
     # POST /api/users/create
     if method == 'POST' and path.endswith('/create'):
         return create_user(body)
 
+    # GET /api/users/type/{type} - NEW ROUTE
+    if method == 'GET' and '/type/' in path:
+        user_type = path_params.get('type', '').lower()
+        return list_users_by_type(user_type)
+
     user_id = path_params.get('user_id')
+
     if not user_id:
         return err('Missing user_id', 400)
 
@@ -80,6 +87,43 @@ def get_user(user_id):
         user['documents'] = docs
 
     return ok(user)
+
+
+def list_users_by_type(user_type):
+    """
+    List all users filtered by type (rider/driver).
+    
+    Path Parameter:
+      - type: 'rider' or 'driver'
+    
+    Returns: Array of user objects
+    """
+    if not user_type or user_type not in ('rider', 'driver'):
+        return err("Invalid type. Must be 'rider' or 'driver'.", 400)
+    
+    try:
+        # Scan all users from the users table
+        response = table('users').scan()
+        users = response.get('Items', [])
+        
+        # Handle pagination if there are many users
+        while 'LastEvaluatedKey' in response:
+            response = table('users').scan(
+                ExclusiveStartKey=response['LastEvaluatedKey']
+            )
+            users.extend(response.get('Items', []))
+        
+        # Filter by user_type
+        filtered_users = [u for u in users if u.get('user_type') == user_type]
+        
+        # Sort by created_at (newest first)
+        filtered_users.sort(key=lambda u: u.get('created_at', ''), reverse=True)
+        
+        return ok(filtered_users)
+    
+    except Exception as e:
+        print(f"LIST_USERS_BY_TYPE - error - {str(e)}")
+        return err(f"Failed to fetch users: {str(e)}", 500)
 
 
 def update_user(user_id, body):

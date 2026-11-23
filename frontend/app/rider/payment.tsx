@@ -138,11 +138,11 @@ export default function PaymentScreen() {
           <View style={styles.rideReceipt}>
             <View style={styles.receiptRow}>
               <Text style={styles.receiptLabel}>Trip Fare</Text>
-              <Text style={styles.receiptValue}>${lastRide?.fare?.toFixed(2) || '0.00'}</Text>
+              <Text style={styles.receiptValue}>${typeof lastRide?.fare === 'string' ? parseFloat(lastRide.fare).toFixed(2) : (lastRide?.fare?.toFixed(2) || '0.00')}</Text>
             </View>
             <View style={styles.receiptRow}>
               <Text style={styles.receiptLabel}>Distance</Text>
-              <Text style={styles.receiptValue}>{lastRide?.distance_miles?.toFixed(1) || '0'} miles</Text>
+              <Text style={styles.receiptValue}>{typeof lastRide?.distance_miles === 'string' ? parseFloat(lastRide.distance_miles).toFixed(1) : (lastRide?.distance_miles?.toFixed(1) || '0')} miles</Text>
             </View>
           </View>
 
@@ -204,16 +204,16 @@ export default function PaymentScreen() {
                 </View>
                 <View style={styles.fareRow}>
                   <Text style={styles.fareLabel}>
-                    Distance ({lastRide.distance_miles?.toFixed(1)} mi × $1.50)
+                    Distance ({typeof lastRide.distance_miles === 'string' ? parseFloat(lastRide.distance_miles).toFixed(1) : (lastRide.distance_miles?.toFixed(1) || '0')} mi × $1.50)
                   </Text>
                   <Text style={styles.fareValue}>
-                    ${((lastRide.distance_miles || 0) * 1.5).toFixed(2)}
+                    ${((typeof lastRide.distance_miles === 'string' ? parseFloat(lastRide.distance_miles) : lastRide.distance_miles || 0) * 1.5).toFixed(2)}
                   </Text>
                 </View>
                 <View style={[styles.fareRow, styles.totalRow]}>
                   <Text style={styles.totalLabel}>Total</Text>
                   <Text style={styles.totalValue}>
-                    ${lastRide.fare?.toFixed(2)}
+                    ${typeof lastRide.fare === 'string' ? parseFloat(lastRide.fare).toFixed(2) : (lastRide.fare?.toFixed(2) || '0.00')}
                   </Text>
                 </View>
               </View>

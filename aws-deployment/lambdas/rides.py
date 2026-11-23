@@ -231,7 +231,7 @@ def get_active_ride(user_id):
         FilterExpression=Attr(id_field).eq(user_id) & Attr('status').is_in(statuses)
     )
     items = result.get('Items', [])
-    return ok(items[0] if items else {})
+    return ok(items[0] if items else None)
 
 
 def get_history(user_id, qs):

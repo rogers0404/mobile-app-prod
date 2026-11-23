@@ -39,23 +39,8 @@ export default function RequestRideScreen() {
   const [estimatedFare, setEstimatedFare] = useState<number | null>(null);
   const [estimatedDistance, setEstimatedDistance] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
-
-  useEffect(() => {
-    initCurrentLocation();
-  }, []);
-
-  useEffect(() => {
-    if (pickupLocation && dropoffLocation) {
-      const distance = calculateDistance(
-        pickupLocation.lat,
-        pickupLocation.lng,
-        dropoffLocation.lat,
-        dropoffLocation.lng
-      );
-      setEstimatedDistance(distance);
-      setEstimatedFare(2 + distance * 1.5);
-    }
-  }, [pickupLocation, dropoffLocation]);
+  const [initialLocationLoading, setInitialLocationLoading] = useState(true);
+  const [selectingPlace, setSelectingPlace] = useState(false);
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
     const R = 3959;
@@ -73,6 +58,7 @@ export default function RequestRideScreen() {
 
   const initCurrentLocation = async () => {
     try {
+      setInitialLocationLoading(true);
       // On web, use browser geolocation directly for better reliability
       if (Platform.OS === 'web' && navigator.geolocation) {
         const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
@@ -95,15 +81,21 @@ export default function RequestRideScreen() {
           const data = await res.json();
           if (data.results?.[0]) {
             setPickupAddress(data.results[0].formatted_address);
+          } else {
+            setPickupAddress(`${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`);
           }
-        } catch {
+        } catch (err) {
+          console.error('Geocoding error:', err);
           setPickupAddress(`${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`);
         }
+        setInitialLocationLoading(false);
         return;
       }
 
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
+        console.warn('Location permission denied');
+        setInitialLocationLoading(false);
         return;
       }
 
@@ -123,9 +115,15 @@ export default function RequestRideScreen() {
         setPickupAddress(
           `${addr.streetNumber || ''} ${addr.street || ''}, ${addr.city || ''}`.trim()
         );
+      } else {
+        setPickupAddress(
+          `${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`
+        );
       }
+      setInitialLocationLoading(false);
     } catch (error) {
       console.error('Location error:', error);
+      setInitialLocationLoading(false);
     }
   };
 
@@ -143,12 +141,23 @@ export default function RequestRideScreen() {
         params.append('longitude', String(pickupLocation.lng));
       }
       const response = await fetch(`${API_URL}/api/places/search?${params}`);
+      
+      if (!response.ok) {
+        console.error(`Search API error (${response.status}):`, await response.text());
+        setSearchResults([]);
+        return;
+      }
+      
       const data = await response.json();
       if (Array.isArray(data)) {
         setSearchResults(data);
+      } else {
+        console.error('Invalid search response:', data);
+        setSearchResults([]);
       }
     } catch (error) {
       console.error('Search error:', error);
+      setSearchResults([]);
     } finally {
       setSearching(false);
     }
@@ -156,7 +165,16 @@ export default function RequestRideScreen() {
 
   const selectPlace = async (place: LocationResult, field: 'pickup' | 'dropoff') => {
     try {
+      setSelectingPlace(true);
       const response = await fetch(`${API_URL}/api/places/details?place_id=${place.place_id}`);
+      
+      if (!response.ok) {
+        const error = await response.text();
+        console.error(`Place details API error (${response.status}):`, error);
+        Alert.alert('Error', 'Failed to load location details. Please try again.');
+        return;
+      }
+      
       const data = await response.json();
 
       if (data.lat && data.lng) {
@@ -167,14 +185,36 @@ export default function RequestRideScreen() {
           setDropoffLocation({ lat: data.lat, lng: data.lng });
           setDropoffAddress(place.description);
         }
+        setSearchResults([]);
+        setActiveField(null);
+      } else {
+        console.error('Invalid place details response:', data);
+        Alert.alert('Error', 'Invalid location data received');
       }
     } catch (error) {
       console.error('Place details error:', error);
+      Alert.alert('Error', 'Failed to load location details');
+    } finally {
+      setSelectingPlace(false);
     }
-
-    setSearchResults([]);
-    setActiveField(null);
   };
+
+  useEffect(() => {
+    initCurrentLocation();
+  }, []);
+
+  useEffect(() => {
+    if (pickupLocation && dropoffLocation) {
+      const distance = calculateDistance(
+        pickupLocation.lat,
+        pickupLocation.lng,
+        dropoffLocation.lat,
+        dropoffLocation.lng
+      );
+      setEstimatedDistance(distance);
+      setEstimatedFare(2 + distance * 1.5);
+    }
+  }, [pickupLocation, dropoffLocation]);
 
   const handleConfirmRide = async () => {
     if (!pickupLocation || !dropoffLocation) {
@@ -194,8 +234,11 @@ export default function RequestRideScreen() {
 
       if (ride) {
         router.replace('/rider/tracking');
+      } else {
+        Alert.alert('Error', 'Failed to create ride. Please try again.');
       }
     } catch (error: any) {
+      console.error('Ride request error:', error);
       Alert.alert('Error', error.message || 'Failed to request ride.');
     }
   };
@@ -258,51 +301,73 @@ export default function RequestRideScreen() {
             <View style={[styles.inputIcon, { backgroundColor: '#DCFCE7' }]}>
               <Ionicons name="location" size={20} color="#10B981" />
             </View>
-            <TextInput
-              style={styles.input}
-              placeholder="Pickup location"
-              value={pickupAddress}
-              onChangeText={(text) => {
-                setPickupAddress(text);
-                setActiveField('pickup');
-                searchPlaces(text);
-              }}
-              onFocus={() => setActiveField('pickup')}
-            />
+            {initialLocationLoading ? (
+              <View style={styles.loadingPlaceholder}>
+                <ActivityIndicator size="small" color="#6B7280" />
+                <Text style={styles.loadingText}>Getting your location...</Text>
+              </View>
+            ) : (
+              <TextInput
+                style={styles.input}
+                placeholder="Pickup location"
+                value={pickupAddress}
+                onChangeText={(text) => {
+                  setPickupAddress(text);
+                  setActiveField('pickup');
+                  searchPlaces(text);
+                }}
+                onFocus={() => setActiveField('pickup')}
+              />
+            )}
           </View>
 
           <View style={styles.inputRow}>
             <View style={[styles.inputIcon, { backgroundColor: '#FEE2E2' }]}>
               <Ionicons name="flag" size={20} color="#EF4444" />
             </View>
-            <TextInput
-              style={styles.input}
-              placeholder="Where to?"
-              value={dropoffAddress}
-              onChangeText={(text) => {
-                setDropoffAddress(text);
-                setActiveField('dropoff');
-                searchPlaces(text);
-              }}
-              onFocus={() => setActiveField('dropoff')}
-            />
+            {selectingPlace ? (
+              <View style={styles.loadingPlaceholder}>
+                <ActivityIndicator size="small" color="#6B7280" />
+                <Text style={styles.loadingText}>Loading location...</Text>
+              </View>
+            ) : (
+              <TextInput
+                style={styles.input}
+                placeholder="Where to?"
+                value={dropoffAddress}
+                onChangeText={(text) => {
+                  setDropoffAddress(text);
+                  setActiveField('dropoff');
+                  searchPlaces(text);
+                }}
+                onFocus={() => setActiveField('dropoff')}
+              />
+            )}
           </View>
         </View>
 
         {searchResults.length > 0 && (
           <ScrollView style={styles.searchResults}>
-            {searchResults.map((result) => (
-              <TouchableOpacity
-                key={result.place_id}
-                style={styles.searchResultItem}
-                onPress={() => selectPlace(result, activeField || 'dropoff')}
-              >
-                <Ionicons name="location-outline" size={20} color="#6B7280" />
-                <Text style={styles.searchResultText} numberOfLines={2}>
-                  {result.description}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {searching && searchResults.length === 0 ? (
+              <View style={styles.searchLoadingContainer}>
+                <ActivityIndicator size="small" color="#6B7280" />
+                <Text style={styles.searchLoadingText}>Searching places...</Text>
+              </View>
+            ) : (
+              searchResults.map((result) => (
+                <TouchableOpacity
+                  key={result.place_id}
+                  style={styles.searchResultItem}
+                  onPress={() => selectPlace(result, activeField || 'dropoff')}
+                  disabled={selectingPlace}
+                >
+                  <Ionicons name="location-outline" size={20} color="#6B7280" />
+                  <Text style={styles.searchResultText} numberOfLines={2}>
+                    {result.description}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            )}
           </ScrollView>
         )}
 
@@ -421,9 +486,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#111827',
   },
+  loadingPlaceholder: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
+    fontStyle: 'italic',
+  },
   searchResults: {
     maxHeight: 200,
     marginTop: 12,
+  },
+  searchLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+  },
+  searchLoadingText: {
+    fontSize: 14,
+    color: '#6B7280',
   },
   searchResultItem: {
     flexDirection: 'row',

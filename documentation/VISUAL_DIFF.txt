@@ -1,0 +1,333 @@
+═══════════════════════════════════════════════════════════════════════════════
+                            EXACT CODE CHANGES
+                   AWS Lambda users.py - GET /api/users
+═══════════════════════════════════════════════════════════════════════════════
+
+CHANGE #1: Add Query Parameter Parsing
+════════════════════════════════════════════════════════════════════════════════
+
+Line 23 (Add after path_params line):
+
+BEFORE:
+─────────────────────────────────────────────────────────────────────────────
+18:  """
+19:  import json
+20:  import uuid
+21:  import os
+22:  from datetime import datetime, timezone
+23:  from common.db import table, ok, err
+24:
+25:
+26:  COGNITO_USER_POOL_ID = os.getenv('COGNITO_USER_POOL_ID')
+27:
+28:
+29:  def lambda_handler(event, context):
+30:      method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method', 'GET'))
+31:      path = event.get('path', event.get('rawPath', ''))
+32:      path_params = event.get('pathParameters') or {}
+33:      body = json.loads(event.get('body') or '{}')
+                                              ↑
+                                      ADD NEW LINE HERE
+
+
+AFTER:
+─────────────────────────────────────────────────────────────────────────────
+18:  """
+19:  import json
+20:  import uuid
+21:  import os
+22:  from datetime import datetime, timezone
+23:  from common.db import table, ok, err
+24:
+25:
+26:  COGNITO_USER_POOL_ID = os.getenv('COGNITO_USER_POOL_ID')
+27:
+28:
+29:  def lambda_handler(event, context):
+30:      method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method', 'GET'))
+31:      path = event.get('path', event.get('rawPath', ''))
+32:      path_params = event.get('pathParameters') or {}
+33:  +   qs = event.get('queryStringParameters') or {}  ← NEW LINE
+34:      body = json.loads(event.get('body') or '{}')
+
+
+ACTION: Insert 1 line after line 32
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+CHANGE #2: Add Routing for List Endpoint
+════════════════════════════════════════════════════════════════════════════════
+
+Lines 25-27 (Add after POST /create block):
+
+BEFORE:
+─────────────────────────────────────────────────────────────────────────────
+34:      body = json.loads(event.get('body') or '{}')
+35:
+36:      # POST /api/users/create
+37:      if method == 'POST' and path.endswith('/create'):
+38:          return create_user(body)
+39:
+40:      user_id = path_params.get('user_id')
+41:      if not user_id:
+                                        ↑
+                                ADD NEW LINES HERE
+
+
+AFTER:
+─────────────────────────────────────────────────────────────────────────────
+34:      body = json.loads(event.get('body') or '{}')
+35:
+36:      # POST /api/users/create
+37:      if method == 'POST' and path.endswith('/create'):
+38:          return create_user(body)
+39:
+40:  +   # GET /api/users (List users - new endpoint)       ← NEW LINES
+41:  +   if method == 'GET' and path.endswith('/users') and not path_params.get('user_id'):
+42:  +       return list_users(qs)
+43:  +
+44:      user_id = path_params.get('user_id')
+45:      if not user_id:
+
+
+ACTION: Insert 4 lines after line 38 (blank + comment + if + return + blank)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+CHANGE #3: Add New list_users() Function
+════════════════════════════════════════════════════════════════════════════════
+
+Add after get_user() function (after line 83), before update_user():
+
+BEFORE:
+─────────────────────────────────────────────────────────────────────────────
+78:
+79:  def get_user(user_id):
+80:      resp = table('users').get_item(Key={'user_id': user_id})
+81:      user = resp.get('Item')
+82:      if not user:
+83:          return err('User not found', 404)
+84:
+85:      if user.get('user_type') == 'driver':
+86:          status = table('driver_status').get_item(Key={'driver_id': user_id}).get('Item', {})
+87:          docs = table('driver_documents').get_item(Key={'driver_id': user_id}).get('Item', {})
+88:          user['driver_status'] = status
+89:          user['documents'] = docs
+90:
+91:      return ok(user)
+92:
+93:
+94:  def update_user(user_id, body):
+                                                        ↑
+                                        ADD NEW FUNCTION HERE
+
+
+AFTER:
+─────────────────────────────────────────────────────────────────────────────
+78:
+79:  def get_user(user_id):
+80:      resp = table('users').get_item(Key={'user_id': user_id})
+81:      user = resp.get('Item')
+82:      if not user:
+83:          return err('User not found', 404)
+84:
+85:      if user.get('user_type') == 'driver':
+86:          status = table('driver_status').get_item(Key={'driver_id': user_id}).get('Item', {})
+87:          docs = table('driver_documents').get_item(Key={'driver_id': user_id}).get('Item', {})
+88:          user['driver_status'] = status
+89:          user['documents'] = docs
+90:
+91:      return ok(user)
+92:
+93:
+94:  +
+95:  + def list_users(qs):                                                    ← NEW FUNCTION START
+96:  +     """
+97:  +     List all users, optionally filtered by type (rider/driver).
+98:  +     
+99:  +     Query Parameters:
+100: +       - type: 'rider', 'driver', or omitted for all users
+101: +     
+102: +     Returns: Array of user objects
+103: +     """
+104: +     user_type = qs.get('type', '').lower() if qs else ''
+105: +     
+106: +     # Validate type parameter if provided
+107: +     if user_type and user_type not in ('rider', 'driver'):
+108: +         return err("Invalid user_type. Must be 'rider' or 'driver' or omitted.", 400)
+109: +     
+110: +     try:
+111: +         # Scan all users from the users table
+112: +         response = table('users').scan()
+113: +         users = response.get('Items', [])
+114: +         
+115: +         # Handle pagination if there are many users
+116: +         while 'LastEvaluatedKey' in response:
+117: +             response = table('users').scan(
+118: +                 ExclusiveStartKey=response['LastEvaluatedKey']
+119: +             )
+120: +             users.extend(response.get('Items', []))
+121: +         
+122: +         # Filter by user_type if specified
+123: +         if user_type:
+124: +             users = [u for u in users if u.get('user_type') == user_type]
+125: +         
+126: +         # Sort by created_at (newest first)
+127: +         users.sort(key=lambda u: u.get('created_at', ''), reverse=True)
+128: +         
+129: +         return ok(users)
+130: +     
+131: +     except Exception as e:
+132: +         print(f"LIST_USERS - error - {str(e)}")
+133: +         return err(f"Failed to fetch users: {str(e)}", 500)      ← NEW FUNCTION END
+134: +
+135:
+136:  def update_user(user_id, body):
+
+
+ACTION: Insert 42 lines (function definition) after line 91
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+SUMMARY OF CHANGES
+════════════════════════════════════════════════════════════════════════════════
+
+Change 1: Line 33 - Add query parameter parsing
+  +   qs = event.get('queryStringParameters') or {}
+
+Change 2: Lines 40-43 - Add routing logic
+  +   # GET /api/users (List users - new endpoint)
+  +   if method == 'GET' and path.endswith('/users') and not path_params.get('user_id'):
+  +       return list_users(qs)
+  +
+
+Change 3: Lines 94-134 - Add new function
+  +   def list_users(qs):
+  +       ... (41 lines of implementation)
+
+Total Changes:
+  - Lines Added: 31 + 11 blank lines = 42 lines total
+  - Lines Modified: 0
+  - Lines Deleted: 0
+  - Functions Added: 1 (list_users)
+  - Functions Modified: 0
+  - Functions Deleted: 0
+
+═══════════════════════════════════════════════════════════════════════════════
+
+EXACT LOCATIONS
+════════════════════════════════════════════════════════════════════════════════
+
+Change #1: Query Parameter Parsing
+  File: /aws-deployment/lambdas/users.py
+  Line: 33 (after `path_params = event.get('pathParameters') or {}`)
+  Type: Insert 1 line
+
+Change #2: Routing Logic
+  File: /aws-deployment/lambdas/users.py
+  Line: 40 (after `return create_user(body)`)
+  Type: Insert 3-4 lines
+
+Change #3: New Function
+  File: /aws-deployment/lambdas/users.py
+  Line: 94 (after `return ok(user)` from get_user())
+  Type: Insert 42 lines
+
+═══════════════════════════════════════════════════════════════════════════════
+
+CHANGED SECTION: lambda_handler()
+════════════════════════════════════════════════════════════════════════════════
+
+BEFORE (Lines 19-37):
+─────────────────────
+def lambda_handler(event, context):
+    method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method', 'GET'))
+    path = event.get('path', event.get('rawPath', ''))
+    path_params = event.get('pathParameters') or {}
+    body = json.loads(event.get('body') or '{}')
+
+    # POST /api/users/create
+    if method == 'POST' and path.endswith('/create'):
+        return create_user(body)
+
+    user_id = path_params.get('user_id')
+
+
+AFTER (Lines 19-45):
+───────────────────
+def lambda_handler(event, context):
+    method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method', 'GET'))
+    path = event.get('path', event.get('rawPath', ''))
+    path_params = event.get('pathParameters') or {}
+    qs = event.get('queryStringParameters') or {}
+    body = json.loads(event.get('body') or '{}')
+
+    # POST /api/users/create
+    if method == 'POST' and path.endswith('/create'):
+        return create_user(body)
+
+    # GET /api/users (List users - new endpoint)
+    if method == 'GET' and path.endswith('/users') and not path_params.get('user_id'):
+        return list_users(qs)
+
+    user_id = path_params.get('user_id')
+
+
+DIFFERENCES:
+  Line 23: + Added `qs = event.get('queryStringParameters') or {}`
+  Line 27-29: + Added routing logic for GET /api/users
+
+═══════════════════════════════════════════════════════════════════════════════
+
+NO CHANGES TO THESE FUNCTIONS
+════════════════════════════════════════════════════════════════════════════════
+
+✅ create_user() - Lines 38-67 (unchanged)
+✅ get_user() - Lines 68-83 (unchanged)
+✅ update_user() - Lines 94-109 (now 115-130, only shifted down due to new function)
+✅ delete_user() - Lines 110-118 (now 131-149, only shifted down due to new function)
+
+The only actual CODE changes are:
+  1. Add 1 line to lambda_handler() for query parameter parsing
+  2. Add 3 lines to lambda_handler() for routing
+  3. Add 1 new function list_users() (27 lines)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+VALIDATION
+════════════════════════════════════════════════════════════════════════════════
+
+After making changes:
+
+1. Check Syntax:
+   python -m py_compile users.py
+
+2. Check Import:
+   python -c "import users"
+
+3. Build:
+   cd aws-deployment/lambdas
+   ./build_and_upload.sh
+
+4. Deploy:
+   cd ../
+   ./deploy.sh
+
+5. Test:
+   curl -X GET "https://dzk2lr8j09.execute-api.us-east-1.amazonaws.com/production/api/users"
+
+═══════════════════════════════════════════════════════════════════════════════
+
+                      ✅ READY TO IMPLEMENT
+
+                   3 Changes Total:
+                   - 1 line added for query params
+                   - 3 lines added for routing
+                   - 27 lines added for new function
+                   - 0 lines modified
+                   - 0 lines deleted
+
+═══════════════════════════════════════════════════════════════════════════════

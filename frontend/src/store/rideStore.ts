@@ -107,7 +107,9 @@ export const useRideStore = create<RideState>((set, get) => ({
       const response = await fetch(`${getApiUrl()}/api/rides/${userId}/active`);
 
       if (response.ok) {
-        const ride = await response.json();
+        const data = await response.json();
+        // Handle both empty object {} and null/undefined cases
+        const ride = data && Object.keys(data).length > 0 ? data : null;
         set({ activeRide: ride });
       } else {
         set({ activeRide: null });
@@ -186,23 +188,30 @@ export const useRideStore = create<RideState>((set, get) => ({
     try {
       set({ isLoading: true });
       const userId = await getUserId();
-      if (!userId) throw new Error('User not found');
+      if (!userId) {
+        const err = new Error('User not found. Please sign in again.');
+        throw err;
+      }
+      
+      const requestBody = { ...data, user_id: userId };
+      console.log('Sending ride request:', requestBody);
       
       const response = await fetch(`${getApiUrl()}/api/rides/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, user_id: userId }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
         let errorMessage = 'Failed to request ride';
         try {
           const error = await response.json();
-          errorMessage = error.detail || errorMessage;
+          errorMessage = error.detail || error.message || errorMessage;
         } catch {
           const text = await response.text();
           if (text) errorMessage = text;
         }
+        console.error(`Ride request failed (${response.status}):`, errorMessage);
         throw new Error(errorMessage);
       }
 
@@ -226,7 +235,10 @@ export const useRideStore = create<RideState>((set, get) => ({
           created_at: new Date().toISOString(),
         };
       }
-      set({ activeRide: ride });
+      if (ride) {
+        console.log('Ride created successfully:', ride.ride_id);
+        set({ activeRide: ride });
+      }
       return ride;
     } catch (error) {
       console.error('Request ride error:', error);
